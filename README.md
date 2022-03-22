@@ -1,10 +1,10 @@
 # EventOS Basic项目说明
 
-邮箱：**event-os@outlook.com**，微信号：**Event-OS**，QQ群：**667432915**。
+邮箱：**event-os@outlook.com**，微信号：**Event-OS**，QQ群：**667432915**。兄弟项目：[EventOS Nano](https://gitee.com/event-os/eventos-nano.git)
 
 -------
 ### 一、EventOS Basic是什么？
-**EventOS Basic**，是一个超级简洁的协作式内核。它的特点有二：一是协作式，不抢占，按优先级轮询，当前任务不释放CPU控制权，其他任务得不到CPU，二是超级轻量。目前提供出来的功能非常基础，列举如下：
+**EventOS Basic**，是一个超级简洁的协作式内核。它的特点有二：一是协作式，不抢占，按优先级轮询，当前任务不释放CPU控制权，其他任务得不到CPU，二是超级轻量（ROM 968字节，RAM 64字节）。目前提供出来的功能非常基础，列举如下：
 + 任务创建。
 + 任务退出，
 + 任务内延时。
@@ -12,7 +12,7 @@
 
 这个代码，功能虽然少，但对于任务并发来说，已经完全足够了。由于是协作内核，任务之间不抢占，完全可以十分放心的使用全局变量，进行任务间通信和信息共享。但有一个需要注意的点：*用户任务之间不抢占，但是对空闲任务是抢占的，也就是空闲任务是可以被随时中断的。*
 
-之所以启动**EventOS Basic**这个项目，是因为**EventOS Nano**项目释放出来后，我发现事件驱动的概念，对一部分嵌入式工程师来说，还是有些不习惯。**EventOS Nano**实际上引入了多个概念，比如面向对象、事件驱动、控制反转等等，这些概念交织在**EventOS Nano**的源码里，很难一下让人接受下来。**EventOS Basic**就诞生了。**EventOS Basic**在传统的任务机制和**EventOS Nano**的事件机制之间，提供了一个过渡。
+之所以启动**EventOS Basic**这个项目，是因为[EventOS Nano](https://gitee.com/event-os/eventos-nano.git)项目释放出来后，我发现事件驱动的概念，对一部分嵌入式工程师来说，还是有些不习惯。**EventOS Nano**实际上引入了多个概念，比如面向对象、事件驱动、控制反转等等，这些概念交织在**EventOS Nano**的源码里，很难一下让人接受下来。**EventOS Basic**就诞生了。**EventOS Basic**在传统的任务机制和**EventOS Nano**的事件机制之间，提供了一个过渡。
 
 另外，**EventOS Basic**还要启动一个新的开发模式，那就是它从一开始，只提供最小功能，然后充分听取用户的意见，按照大多数用户的意见开发。这样做的目的，是为将来的**EventOS**的技术走向，收集需求。
 
@@ -35,14 +35,87 @@
 
 ### 三、代码例程
 
-使用是，要遵循以下注意点。
+使用时，要遵循以下注意点。
 + 不要使用毫秒级以上的循环阻塞代码，这样的话，其他任务会得不到CPU。
 + 要注意，在合适的时候，经常释放CPU。
 + 任务间的全局变量可以放心使用，中断与任务间的全局变量，仍需关中断来保护数据的完整性。
 
 任务启动的过程如下所示：
 ``` C
+/* data --------------------------------------------------------------------- */
+static uint64_t stack_led[32];
+eos_task_t led;
+
+static uint64_t stack_count[32];
+eos_task_t count;
+
+static uint64_t stack_test_exit[32];
+eos_task_t test_exit;
+
+/* main function ------------------------------------------------------------ */
+int main(void)
+{
+    if (SysTick_Config(SystemCoreClock / 1000) != 0)
+        while (1);
+    
+    static uint64_t stack_idle[32];
+    eos_init(stack_idle, sizeof(stack_idle));       // EventOS初始化
+    
+    // 启动LED闪烁任务
+    eos_task_start(&led, task_entry_led, 1, stack_led, sizeof(stack_led));
+
+    // 启动计数任务
+    eos_task_start(&count, task_entry_count, 2, stack_count, sizeof(stack_count));
+
+    eos_run();                                      // EventOS启动
+
+    return 0;
+}
 ```
+
+任务函数的实现如下。在任务里也可以启动其他任务。
+``` C
+uint8_t led_status = 0;
+static void task_entry_led(void)
+{
+    eos_task_start(&test_exit, task_entry_test_exit, 3, stack_test_exit, sizeof(stack_test_exit));
+    
+    while (1) {
+        led_status = 0;
+        eos_delay_ms(500);
+        led_status = 1;
+        eos_delay_ms(500);
+    }
+}
+```
+
+任务退出时，其应用如下所示。
+``` C
+uint8_t led_status = 0;
+static void task_entry_led(void)
+{
+    eos_task_start(&test_exit, task_entry_test_exit, 3, stack_test_exit, sizeof(stack_test_exit));
+    
+    while (1) {
+        led_status = 0;
+        eos_delay_ms(500);
+        led_status = 1;
+        eos_delay_ms(500);
+    }
+}
+```
+
+系统滴答函数，放在定时器中断里，最好放在SysTick中断里。
+``` C
+void SysTick_Handler(void)
+{
+    eos_tick();
+}
+```
+
+目前只有STM32F429的例程是可用的。但这个移植，适用于所有的ARM Cortex-M系列芯片，可以很容易的应用在其他芯片上。有一个需要注意的点，也就是现在的移植，仍然不支持FPU。需要在MDK的工程设置里，关闭浮点数单元的使用。如图所示。
+
+![avatar](/documentation/fpu_disable.png)
 
 ### 四、代码结构
 #### **核心代码**

@@ -41,7 +41,7 @@ extern "C" {
 /* assert ------------------------------------------------------------------- */
 #if (EOS_USE_ASSERT != 0)
 #define EOS_ASSERT(test_) do { if (!(test_)) {                                 \
-        eos_port_critical_enter();                                             \
+        eos_critical_enter();                                             \
         eos_port_assert(__LINE__);                                             \
     } } while (0)
 #else
@@ -74,11 +74,13 @@ static eos_task_t task_idle;
 /* private function --------------------------------------------------------- */
 static void eos_sheduler(void);
 static void task_entry_idle(void);
+static void eos_critical_enter(void);
+static void eos_critical_exit(void);
 
 /* public function ---------------------------------------------------------- */
 void eos_init(void *stack_idle, uint32_t size)
 {
-    eos_port_critical_enter();
+    eos_critical_enter();
 
     // Set PendSV to be the lowest priority.
     *(uint32_t volatile *)0xE000ED20 |= (0xFFU << 16U);
@@ -92,7 +94,7 @@ void eos_init(void *stack_idle, uint32_t size)
     for (int i = 0; i < EOS_MAX_TASKS; i ++) {
         eos.task[i] = (void *)0;
     }
-    eos_port_critical_exit();
+    eos_critical_exit();
 
     eos_task_start(&task_idle, task_entry_idle, 0, stack_idle, size);
 }
@@ -140,16 +142,16 @@ void eos_task_start(  eos_task_t * const me,
         *sp = 0xDEADBEEFU;
     }
 
-    eos_port_critical_enter();
+    eos_critical_enter();
     me->priority = priority;
     eos.task[priority] = me;
     eos.exist |= (1 << priority);
     
     if (eos_current == &task_idle) {
-        eos_port_critical_exit();
+        eos_critical_exit();
         eos_sheduler();
     }
-    eos_port_critical_exit();
+    eos_critical_exit();
 }
 
 void eos_run(void)
@@ -161,7 +163,7 @@ void eos_run(void)
 
 void eos_tick(void)
 {
-    eos_port_critical_enter();
+    eos_critical_enter();
     eos.time += EOS_TICK_MS;
     if (eos.time >= EOS_MS_NUM_15DAY) {
         for (uint32_t i = 0; i < EOS_MAX_TASKS; i ++) {
@@ -187,7 +189,7 @@ void eos_tick(void)
         }
         working_set &=~ bit;                /* remove from working set */
     }
-    eos_port_critical_exit();
+    eos_critical_exit();
     
     if (eos_current == &task_idle) {
         eos_sheduler();
@@ -201,43 +203,86 @@ void eos_delay_ms(uint32_t time_ms)
     /* never call eos_delay_ms and eos_delay_ticks in the idle task */
     EOS_ASSERT(eos_current != &task_idle);
 
-    eos_port_critical_enter();
+    eos_critical_enter();
     eos_current->timeout = eos.time + time_ms;
     eos.delay |= (1U << (eos_current->priority));
-    eos_port_critical_exit();
+    eos_critical_exit();
     
     eos_sheduler();
 }
 
 void eos_exit(void)
 {
-    eos_port_critical_enter();
+    eos_critical_enter();
     eos.task[eos_current->priority] = (void *)0;
     eos.exist &= ~(1 << eos_current->priority);
-    eos_port_critical_exit();
+    eos_critical_exit();
     
     eos_sheduler();
 }
 
 static void eos_sheduler(void)
 {
-    eos_port_critical_enter();
+    eos_critical_enter();
     /* eos_next = ... */
     eos_next = eos.task[LOG2(eos.exist & (~eos.delay)) - 1];
     /* trigger PendSV, if needed */
     if (eos_next != eos_current) {
         *(uint32_t volatile *)0xE000ED04 = (1U << 28);
     }
-    eos_port_critical_exit();
+    eos_critical_exit();
 }
 
 uint64_t eos_time(void)
 {
-    eos_port_critical_enter();
+    eos_critical_enter();
     uint64_t time_offset = eos.time_offset;
-    eos_port_critical_enter();
+    eos_critical_enter();
 
     return (time_offset + eos.time);
+}
+
+__asm void PendSV_Handler(void)
+{
+    IMPORT        eos_current           /* extern variable */
+    IMPORT        eos_next              /* extern variable */
+
+#if (__TARGET_ARCH_THUMB == 3)          /* Cortex-M0/M0+/M1 (v6-M, v6S-M)? */
+    CPSID   i                           /* disable interrupts (set PRIMASK) */
+#else
+    MOVS    r0,#0x3F
+    CPSID   i                           /* selectively disable interrutps with BASEPRI */
+    MSR     BASEPRI,r0                  /* apply the workaround the Cortex-M7 erraturm */
+    CPSIE   i                           /* 837070, see SDEN-1068427. */
+#endif                                  /* M3/M4/M7 */
+
+    LDR           r1,=eos_current       /* if (eos_current != 0) { */
+    LDR           r1,[r1,#0x00]
+    CBZ           r1,PendSV_restore
+
+    PUSH          {r4-r11}              /*     push r4-r11 into stack */
+    LDR           r1,=eos_current       /*     eos_current->sp = sp; */
+    LDR           r1,[r1,#0x00]
+    STR           sp,[r1,#0x00]         /* } */
+    
+PendSV_restore
+    LDR           r1,=eos_next          /* sp = eos_next->sp; */
+    LDR           r1,[r1,#0x00]
+    LDR           sp,[r1,#0x00]
+
+    LDR           r1,=eos_next          /* eos_current = eos_next; */
+    LDR           r1,[r1,#0x00]
+    LDR           r2,=eos_current
+    STR           r1,[r2,#0x00]
+    POP           {r4-r11}              /* pop registers r4-r11 */
+#if (__TARGET_ARCH_THUMB == 3)          /* Cortex-M0/M0+/M1 (v6-M, v6S-M)? */
+    CPSIE   i                           /* enable interrupts (clear PRIMASK) */
+#else                                   /* M3/M4/M7 */
+    MOVS    r0,#0
+    MSR     BASEPRI,r0                  /* enable interrupts (clear BASEPRI) */
+    DSB                                 /* ARM Erratum 838869 */
+#endif                                  /* M3/M4/M7 */
+    BX            lr                    /* return to the next task */
 }
 
 /* private function --------------------------------------------------------- */
@@ -245,6 +290,22 @@ static void task_entry_idle(void)
 {
     while (1) {
         eos_hook_idle();
+    }
+}
+
+static int critical_count = 0;
+static void eos_critical_enter(void)
+{
+    __disable_irq();
+    critical_count ++;
+}
+
+static void eos_critical_exit(void)
+{
+    critical_count --;
+    if (critical_count <= 0) {
+        critical_count = 0;
+        __enable_irq();
     }
 }
 

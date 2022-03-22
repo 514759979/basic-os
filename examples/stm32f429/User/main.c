@@ -2,7 +2,7 @@
 #include "stm32f4xx.h"
 #include "eventos.h"
 
-/* task entry ------------------------------------------------------------- */
+/* task entry --------------------------------------------------------------- */
 static void task_entry_led(void);
 static void task_entry_count(void);
 static void task_entry_test_exit(void);

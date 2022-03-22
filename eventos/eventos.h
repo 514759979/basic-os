@@ -43,7 +43,7 @@ extern "C" {
 
 /* Config ------------------------------------------------------------------- */
 // 支持的最大的线程数
-#define EOS_MAX_TASKS                           32
+#define EOS_MAX_TASKS                           4
 
 #define EOS_TICK_MS                             1
 
@@ -84,8 +84,6 @@ void eos_task_start(eos_task_t * const me,
                     uint32_t stack_size);
 
 /* port --------------------------------------------------------------------- */
-void eos_port_critical_enter(void);
-void eos_port_critical_exit(void);
 void eos_port_assert(uint32_t error_id);
 
 /* hook --------------------------------------------------------------------- */
