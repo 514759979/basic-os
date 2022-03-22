@@ -27,7 +27,7 @@
  * 
  * Change Logs:
  * Date           Author        Notes
- * 2021-11-23     DogMing       V0.0.1
+ * 2021-11-23     DogMing       V0.1.0
  */
 
 /* include ------------------------------------------------------------------ */
@@ -49,11 +49,11 @@ extern "C" {
 #endif
 
 /* eos task ----------------------------------------------------------------- */
-eos_thread_t *volatile eos_current;
-eos_thread_t *volatile eos_next;
+eos_task_t *volatile eos_current;
+eos_task_t *volatile eos_next;
 
 typedef struct eos_tag {
-    eos_thread_t * thread[EOS_MAX_THREADS];
+    eos_task_t * task[EOS_MAX_TASKS];
 
     uint32_t delay;
     uint32_t exist;
@@ -62,8 +62,8 @@ typedef struct eos_tag {
 } eos_t;
 
 eos_t eos;
-static uint64_t stack_idle[32];
-static eos_thread_t thread_idle;
+
+static eos_task_t task_idle;
 
 /* macro -------------------------------------------------------------------- */
 #define LOG2(x) (32U - __builtin_clz(x))
@@ -73,10 +73,10 @@ static eos_thread_t thread_idle;
 
 /* private function --------------------------------------------------------- */
 static void eos_sheduler(void);
-static void thread_entry_idle(void);
+static void task_entry_idle(void);
 
 /* public function ---------------------------------------------------------- */
-void eos_init(void)
+void eos_init(void *stack_idle, uint32_t size)
 {
     eos_port_critical_enter();
 
@@ -87,23 +87,23 @@ void eos_init(void)
     eos.delay = 0;
     eos.time_offset = 0;
     eos_current = (void *)0;
-    eos_next = &thread_idle;
+    eos_next = &task_idle;
     
-    for (int i = 0; i < EOS_MAX_THREADS; i ++) {
-        eos.thread[i] = (void *)0;
+    for (int i = 0; i < EOS_MAX_TASKS; i ++) {
+        eos.task[i] = (void *)0;
     }
     eos_port_critical_exit();
 
-    eos_thread_start(&thread_idle, thread_entry_idle, 0, stack_idle, sizeof(stack_idle));
+    eos_task_start(&task_idle, task_entry_idle, 0, stack_idle, size);
 }
 
-void eos_thread_start(  eos_thread_t * const me,
+void eos_task_start(  eos_task_t * const me,
                         eos_func_t func,
                         uint8_t priority,
                         void *stack_addr,
                         uint32_t stack_size)
 {
-    EOS_ASSERT(eos.thread[priority] == (void *)0);
+    EOS_ASSERT(eos.task[priority] == (void *)0);
     
     /* round down the stack top to the 8-byte boundary
      * NOTE: ARM Cortex-M stack grows down from hi -> low memory
@@ -142,10 +142,10 @@ void eos_thread_start(  eos_thread_t * const me,
 
     eos_port_critical_enter();
     me->priority = priority;
-    eos.thread[priority] = me;
+    eos.task[priority] = me;
     eos.exist |= (1 << priority);
     
-    if (eos_current == &thread_idle) {
+    if (eos_current == &task_idle) {
         eos_port_critical_exit();
         eos_sheduler();
     }
@@ -164,32 +164,32 @@ void eos_tick(void)
     eos_port_critical_enter();
     eos.time += EOS_TICK_MS;
     if (eos.time >= EOS_MS_NUM_15DAY) {
-        for (uint32_t i = 0; i < EOS_MAX_THREADS; i ++) {
-            if (eos.thread[i] != (void *)0) {
-                eos.thread[i]->timeout -= eos.time;
+        for (uint32_t i = 0; i < EOS_MAX_TASKS; i ++) {
+            if (eos.task[i] != (void *)0) {
+                eos.task[i]->timeout -= eos.time;
             }
         }
         eos.time_offset += eos.time;
         eos.time = 0;
     }
-    eos_port_critical_exit();
-
+    
     /* check all the time-events are timeout or not */
     uint32_t working_set, bit;
     working_set = eos.delay;
     while (working_set != 0U) {
-        eos_thread_t *t = eos.thread[LOG2(working_set) - 1];
-        EOS_ASSERT(t != (eos_thread_t *)0);
-        EOS_ASSERT(((eos_thread_t *)t)->timeout != 0U);
+        eos_task_t *t = eos.task[LOG2(working_set) - 1];
+        EOS_ASSERT(t != (eos_task_t *)0);
+        EOS_ASSERT(((eos_task_t *)t)->timeout != 0U);
 
-        bit = (1U << (((eos_thread_t *)t)->priority));
-        if (eos.time >= ((eos_thread_t *)t)->timeout) {
+        bit = (1U << (((eos_task_t *)t)->priority));
+        if (eos.time >= ((eos_task_t *)t)->timeout) {
             eos.delay &= ~bit;              /* remove from set */
         }
         working_set &=~ bit;                /* remove from working set */
     }
-
-    if (eos_current == &thread_idle) {
+    eos_port_critical_exit();
+    
+    if (eos_current == &task_idle) {
         eos_sheduler();
     }
 }
@@ -198,22 +198,23 @@ void eos_delay_ms(uint32_t time_ms)
 {
     EOS_ASSERT(time_ms <= EOS_MS_NUM_30DAY);
 
-    eos_port_critical_enter();
-
     /* never call eos_delay_ms and eos_delay_ticks in the idle task */
-    EOS_ASSERT(eos_current != &thread_idle);
+    EOS_ASSERT(eos_current != &task_idle);
 
+    eos_port_critical_enter();
     eos_current->timeout = eos.time + time_ms;
     eos.delay |= (1U << (eos_current->priority));
+    eos_port_critical_exit();
     
     eos_sheduler();
-    eos_port_critical_exit();
 }
 
 void eos_exit(void)
 {
-    eos.thread[eos_current->priority] = (void *)0;
+    eos_port_critical_enter();
+    eos.task[eos_current->priority] = (void *)0;
     eos.exist &= ~(1 << eos_current->priority);
+    eos_port_critical_exit();
     
     eos_sheduler();
 }
@@ -222,7 +223,7 @@ static void eos_sheduler(void)
 {
     eos_port_critical_enter();
     /* eos_next = ... */
-    eos_next = eos.thread[LOG2(eos.exist & (~eos.delay)) - 1];
+    eos_next = eos.task[LOG2(eos.exist & (~eos.delay)) - 1];
     /* trigger PendSV, if needed */
     if (eos_next != eos_current) {
         *(uint32_t volatile *)0xE000ED04 = (1U << 28);
@@ -240,7 +241,7 @@ uint64_t eos_time(void)
 }
 
 /* private function --------------------------------------------------------- */
-static void thread_entry_idle(void)
+static void task_entry_idle(void)
 {
     while (1) {
         eos_hook_idle();

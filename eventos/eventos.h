@@ -43,25 +43,29 @@ extern "C" {
 
 /* Config ------------------------------------------------------------------- */
 // 支持的最大的线程数
-#define EOS_MAX_THREADS                         32
+#define EOS_MAX_TASKS                           32
 
 #define EOS_TICK_MS                             1
 
 #define EOS_USE_ASSERT                          1
 
+#if (EOS_MAX_TASKS > 32)
+#error The number of tasks can NOT be larger than 32 !
+#endif
+
 /* Data structure ----------------------------------------------------------- */
 typedef void (* eos_func_t)(void);
 
-// Thread
+// Task
 typedef struct eos_actor {
     uint32_t *sp;
     uint32_t timeout;
     uint32_t priority              : 5;
-} eos_thread_t;
+} eos_task_t;
 
 // api -------------------------------------------------------------------------
 // 初始化
-void eos_init(void);
+void eos_init(void *stack_idle, uint32_t size);
 // 启动系统
 void eos_run(void);
 // 系统当前时间
@@ -73,11 +77,11 @@ void eos_delay_ms(uint32_t time_ms);
 // 退出线程
 void eos_exit(void);
 // 启动线程
-void eos_thread_start(  eos_thread_t * const me,
-                        eos_func_t func,
-                        uint8_t priority,
-                        void *stack_addr,
-                        uint32_t stack_size);
+void eos_task_start(eos_task_t * const me,
+                    eos_func_t func,
+                    uint8_t priority,
+                    void *stack_addr,
+                    uint32_t stack_size);
 
 /* port --------------------------------------------------------------------- */
 void eos_port_critical_enter(void);
