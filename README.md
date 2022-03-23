@@ -91,17 +91,15 @@ static void task_entry_led(void)
 
 任务退出时，其应用如下所示。
 ``` C
-uint8_t led_status = 0;
-static void task_entry_led(void)
+uint32_t count_num_exit = 0;
+static void task_entry_test_exit(void)
 {
-    eos_task_start(&test_exit, task_entry_test_exit, 3, stack_test_exit, sizeof(stack_test_exit));
-    
-    while (1) {
-        led_status = 0;
-        eos_delay_ms(500);
-        led_status = 1;
-        eos_delay_ms(500);
+    for (int i = 0; i < 10 ; i ++) {
+        count_num_exit ++;
+        eos_delay_ms(10);
     }
+    
+    eos_exit();
 }
 ```
 
