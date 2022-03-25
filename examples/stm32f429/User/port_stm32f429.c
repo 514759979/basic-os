@@ -15,7 +15,9 @@ static void eos_delay_block(uint32_t time_ms)
     for (uint32_t i = 0; i < time_ms; i ++) {
         uint32_t time_count = 36000;
         while (time_count --) {
+#if (defined __CC_ARM)
             __nop();
+#endif
         }
     }
 }

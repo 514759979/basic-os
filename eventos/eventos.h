@@ -36,6 +36,7 @@
 
 /* include ------------------------------------------------------------------ */
 #include <stdint.h>
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -44,6 +45,9 @@ extern "C" {
 /* Config ------------------------------------------------------------------- */
 // 支持的最大的线程数
 #define EOS_MAX_TASKS                           4
+
+// 支持的最大的软定时器数
+#define EOS_MAX_TIMERS                          4
 
 #define EOS_TICK_MS                             1
 
@@ -63,7 +67,16 @@ typedef struct eos_actor {
     uint32_t priority              : 5;
 } eos_task_t;
 
-// api -------------------------------------------------------------------------
+typedef struct eos_timer {
+    struct eos_timer *next;
+    uint32_t time;
+    uint32_t time_out;
+    eos_func_t callback;
+    uint32_t domain                 : 8;
+    uint32_t oneshoot               : 1;
+} eos_timer_t;
+
+/* 任务相关 ------------------------------------------------------------------ */
 // 初始化
 void eos_init(void *stack_idle, uint32_t size);
 // 启动系统
@@ -72,16 +85,31 @@ void eos_run(void);
 uint64_t eos_time(void);
 // 系统滴答
 void eos_tick(void);
-// 线程内延时
+// 任务内延时
 void eos_delay_ms(uint32_t time_ms);
-// 退出线程
+// 退出任务
 void eos_exit(void);
-// 启动线程
+// 启动任务
 void eos_task_start(eos_task_t * const me,
                     eos_func_t func,
                     uint8_t priority,
                     void *stack_addr,
                     uint32_t stack_size);
+
+/* 软定时器 ------------------------------------------------------------------ */
+// 启动软定时器
+int32_t eos_timer_start(eos_timer_t const *me,
+                        uint32_t time,
+                        bool oneshoot,
+                        eos_func_t callback);
+// 暂停
+void eos_timer_pause(uint16_t timer_id);
+// 继续
+void eos_timer_continue(uint16_t timer_id);
+// 停止
+void eos_timer_stop(uint16_t timer_id);
+// 重启
+void eos_timer_reset(uint16_t timer_id);
 
 /* port --------------------------------------------------------------------- */
 void eos_port_assert(uint32_t error_id);

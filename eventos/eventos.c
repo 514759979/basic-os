@@ -99,12 +99,13 @@ void eos_init(void *stack_idle, uint32_t size)
     eos_task_start(&task_idle, task_entry_idle, 0, stack_idle, size);
 }
 
-void eos_task_start(  eos_task_t * const me,
-                        eos_func_t func,
-                        uint8_t priority,
-                        void *stack_addr,
-                        uint32_t stack_size)
+void eos_task_start(eos_task_t * const me,
+                    eos_func_t func,
+                    uint8_t priority,
+                    void *stack_addr,
+                    uint32_t stack_size)
 {
+    EOS_ASSERT(priority < EOS_MAX_TIMERS);
     EOS_ASSERT(eos.task[priority] == (void *)0);
     
     /* round down the stack top to the 8-byte boundary
@@ -242,6 +243,7 @@ uint64_t eos_time(void)
     return (time_offset + eos.time);
 }
 
+#if (defined __CC_ARM)
 __asm void PendSV_Handler(void)
 {
     IMPORT        eos_current           /* extern variable */
@@ -276,14 +278,71 @@ PendSV_restore
     STR           r1,[r2,#0x00]
     POP           {r4-r11}              /* pop registers r4-r11 */
 #if (__TARGET_ARCH_THUMB == 3)          /* Cortex-M0/M0+/M1 (v6-M, v6S-M)? */
-    CPSIE   i                           /* enable interrupts (clear PRIMASK) */
+    CPSIE         i                     /* enable interrupts (clear PRIMASK) */
 #else                                   /* M3/M4/M7 */
-    MOVS    r0,#0
-    MSR     BASEPRI,r0                  /* enable interrupts (clear BASEPRI) */
+    MOVS          r0,#0
+    MSR           BASEPRI,r0            /* enable interrupts (clear BASEPRI) */
     DSB                                 /* ARM Erratum 838869 */
 #endif                                  /* M3/M4/M7 */
     BX            lr                    /* return to the next task */
 }
+#endif
+
+/*******************************************************************************
+* NOTE:
+* The inline GNU assembler does not accept mnemonics MOVS, LSRS and ADDS,
+* but for Cortex-M0/M0+/M1 the mnemonics MOV, LSR and ADD always set the
+* condition flags in the PSR.
+*******************************************************************************/
+#if ((defined __GNUC__) || (defined __ICCARM__))
+#if (defined __GNUC__)
+__attribute__ ((naked))
+#endif
+#if ((defined __ICCARM__))
+__stackless
+#endif
+void PendSV_Handler(void)
+{
+    __asm volatile
+    (
+#if (__TARGET_ARCH_THUMB == 3)          /* Cortex-M0/M0+/M1 (v6-M, v6S-M)? */
+    "CPSID   i                      \n" /* disable interrupts (set PRIMASK) */
+#else
+    "MOVS    r0,#0x3F               \n"
+    "CPSID   i                      \n"  /* selectively disable interrutps with BASEPRI */
+    "MSR     BASEPRI,r0             \n"  /* apply the workaround the Cortex-M7 erraturm */
+    "CPSIE   i                      \n"  /* 837070, see SDEN-1068427. */
+#endif                                  /* M3/M4/M7 */
+
+    "LDR           r1,=eos_current  \n"  /* if (eos_current != 0) { */
+    "LDR           r1,[r1,#0x00]    \n"
+    "CBZ           r1,restore       \n"
+
+    "PUSH          {r4-r11}         \n"  /*     push r4-r11 into stack */
+    "LDR           r1,=eos_current  \n"  /*     eos_current->sp = sp; */
+    "LDR           r1,[r1,#0x00]    \n"
+    "STR           sp,[r1,#0x00]    \n"  /* } */
+    
+    "restore: LDR r1,=eos_next      \n"  /* sp = eos_next->sp; */
+    "LDR           r1,[r1,#0x00]    \n"
+    "LDR           sp,[r1,#0x00]    \n"
+
+    "LDR           r1,=eos_next     \n"  /* eos_current = eos_next; */
+    "LDR           r1,[r1,#0x00]    \n"
+    "LDR           r2,=eos_current  \n"
+    "STR           r1,[r2,#0x00]    \n"
+    "POP           {r4-r11}         \n"  /* pop registers r4-r11 */
+#if (__TARGET_ARCH_THUMB == 3)          /* Cortex-M0/M0+/M1 (v6-M, v6S-M)? */
+    "CPSIE         i                \n"  /* enable interrupts (clear PRIMASK) */
+#else                                   /* M3/M4/M7 */
+    "MOVS          r0,#0           \n"
+    "MSR           BASEPRI,r0      \n"  /* enable interrupts (clear BASEPRI) */
+    "DSB                           \n"  /* ARM Erratum 838869 */
+#endif                                  /* M3/M4/M7 */
+    "BX            lr              \n"   /* return to the next task */
+    );
+}
+#endif
 
 /* private function --------------------------------------------------------- */
 static void task_entry_idle(void)
@@ -293,21 +352,49 @@ static void task_entry_idle(void)
     }
 }
 
-static int critical_count = 0;
-static void eos_critical_enter(void)
+static int32_t critical_count = 0;
+void eos_critical_enter(void)
 {
+#if (defined __CC_ARM)
     __disable_irq();
+#elif ((defined __GNUC__) || (defined __ICCARM__))
+    __asm volatile
+    (
+#if (__TARGET_ARCH_THUMB == 3)          /* Cortex-M0/M0+/M1 (v6-M, v6S-M)? */
+    "CPSID   i                      \n" /* disable interrupts (set PRIMASK) */
+#else
+    "MOVS    r0,#0x3F               \n"
+    "CPSID   i                      \n"  /* selectively disable interrutps with BASEPRI */
+    "MSR     BASEPRI,r0             \n"  /* apply the workaround the Cortex-M7 erraturm */
+    "CPSIE   i                      \n"  /* 837070, see SDEN-1068427. */
+#endif                                  /* M3/M4/M7 */
+    );
+#endif
     critical_count ++;
 }
 
-static void eos_critical_exit(void)
+void eos_critical_exit(void)
 {
     critical_count --;
     if (critical_count <= 0) {
         critical_count = 0;
+#if (defined __CC_ARM)
         __enable_irq();
+#elif ((defined __GNUC__) || (defined __ICCARM__))
+        __asm volatile
+        (
+#if (__TARGET_ARCH_THUMB == 3)          /* Cortex-M0/M0+/M1 (v6-M, v6S-M)? */
+        "CPSIE         i                \n"  /* enable interrupts (clear PRIMASK) */
+#else                                   /* M3/M4/M7 */
+        "MOVS          r0,#0           \n"
+        "MSR           BASEPRI,r0      \n"  /* enable interrupts (clear BASEPRI) */
+        "DSB                           \n"  /* ARM Erratum 838869 */
+#endif                                  /* M3/M4/M7 */
+        );
+#endif
     }
 }
+
 
 #ifdef __cplusplus
 }
