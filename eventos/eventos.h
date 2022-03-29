@@ -88,7 +88,7 @@ void eos_tick(void);
 // 任务内延时
 void eos_delay_ms(uint32_t time_ms);
 // 退出任务
-void eos_exit(void);
+void eos_task_exit(void);
 // 启动任务
 void eos_task_start(eos_task_t * const me,
                     eos_func_t func,

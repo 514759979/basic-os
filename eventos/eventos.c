@@ -119,18 +119,18 @@ void eos_task_start(eos_task_t * const me,
     *(-- sp) = (uint32_t)func;                 /* R14(LR) */
     *(-- sp) = (uint32_t)0x12121212u;          /* R12 */
     *(-- sp) = (uint32_t)0x03030303u;          /* R3 */
-    *(-- sp) = (uint32_t)0x02020202u;          /* R2 */
+    *(-- sp) = (uint32_t)0x02020202u;          /* r2 */
     *(-- sp) = (uint32_t)0x01010101u;          /* R1 */
-    *(-- sp) = (uint32_t)0x00000000u;          /* R0 */
-    /* additionally, fake registers R4-R11 */
-    *(-- sp) = (uint32_t)0x11111111u;          /* R11 */
-    *(-- sp) = (uint32_t)0x10101010u;          /* R10 */
-    *(-- sp) = (uint32_t)0x09090909u;          /* R9 */
-    *(-- sp) = (uint32_t)0x08080808u;          /* R8 */
-    *(-- sp) = (uint32_t)0x07070707u;          /* R7 */
-    *(-- sp) = (uint32_t)0x06060606u;          /* R6 */
-    *(-- sp) = (uint32_t)0x05050505u;          /* R5 */
-    *(-- sp) = (uint32_t)0x04040404u;          /* R4 */
+    *(-- sp) = (uint32_t)0x00000000u;          /* r0 */
+    /* additionally, fake registers r4-r11 */
+    *(-- sp) = (uint32_t)0x11111111u;          /* r11 */
+    *(-- sp) = (uint32_t)0x10101010u;          /* r10 */
+    *(-- sp) = (uint32_t)0x09090909u;          /* r9 */
+    *(-- sp) = (uint32_t)0x08080808u;          /* r8 */
+    *(-- sp) = (uint32_t)0x07070707u;          /* r7 */
+    *(-- sp) = (uint32_t)0x06060606u;          /* r6 */
+    *(-- sp) = (uint32_t)0x05050505u;          /* r5 */
+    *(-- sp) = (uint32_t)0x04040404u;          /* r4 */
 
     /* save the top of the stack in the task's attibute */
     me->sp = sp;
@@ -212,7 +212,7 @@ void eos_delay_ms(uint32_t time_ms)
     eos_sheduler();
 }
 
-void eos_exit(void)
+void eos_task_exit(void)
 {
     eos_critical_enter();
     eos.task[eos_current->priority] = (void *)0;
@@ -249,41 +249,58 @@ __asm void PendSV_Handler(void)
     IMPORT        eos_current           /* extern variable */
     IMPORT        eos_next              /* extern variable */
 
-#if (__TARGET_ARCH_THUMB == 3)          /* Cortex-M0/M0+/M1 (v6-M, v6S-M)? */
-    CPSID   i                           /* disable interrupts (set PRIMASK) */
-#else
-    MOVS    r0,#0x3F
-    CPSID   i                           /* selectively disable interrutps with BASEPRI */
-    MSR     BASEPRI,r0                  /* apply the workaround the Cortex-M7 erraturm */
-    CPSIE   i                           /* 837070, see SDEN-1068427. */
-#endif                                  /* M3/M4/M7 */
+    CPSID         i                     /* disable interrupts (set PRIMASK) */
 
     LDR           r1,=eos_current       /* if (eos_current != 0) { */
     LDR           r1,[r1,#0x00]
+#if (__TARGET_ARCH_THUMB == 3)          /* Cortex-M0/M0+/M1 (v6-M, v6S-M)? */
+    CMP           r1, #0
+    BEQ           PendSV_restore
+    NOP
+    PUSH          {r4-r7}              /*     push r4-r11 into stack */
+    MOV           r4, r8
+    MOV           r5, r9
+    MOV           r6, r10
+    MOV           r7, r11
+    PUSH          {r4-r7}
+#else
     CBZ           r1,PendSV_restore
-
     PUSH          {r4-r11}              /*     push r4-r11 into stack */
+#endif
+  
     LDR           r1,=eos_current       /*     eos_current->sp = sp; */
     LDR           r1,[r1,#0x00]
-    STR           sp,[r1,#0x00]         /* } */
+#if (__TARGET_ARCH_THUMB == 3)          /* Cortex-M0/M0+/M1 (v6-M, v6S-M)? */
+    MOV           r2, SP
+    STR           r2,[r1,#0x00]         /* } */
+#else
+    STR           SP,[r1,#0x00]
+#endif
     
 PendSV_restore
     LDR           r1,=eos_next          /* sp = eos_next->sp; */
     LDR           r1,[r1,#0x00]
+#if (__TARGET_ARCH_THUMB == 3)          /* Cortex-M0/M0+/M1 (v6-M, v6S-M)? */
+    LDR           r0,[r1,#0x00]
+    MOV           SP, r0
+#else
     LDR           sp,[r1,#0x00]
-
+#endif
     LDR           r1,=eos_next          /* eos_current = eos_next; */
     LDR           r1,[r1,#0x00]
     LDR           r2,=eos_current
     STR           r1,[r2,#0x00]
-    POP           {r4-r11}              /* pop registers r4-r11 */
 #if (__TARGET_ARCH_THUMB == 3)          /* Cortex-M0/M0+/M1 (v6-M, v6S-M)? */
+    POP           {r4-r7}
+    MOV           r8, r4
+    MOV           r9, r5
+    MOV           r10,r6
+    MOV           r11,r7
+    POP           {r4-r7}
+#else
+    POP           {r4-r11}              /* pop registers r4-r11 */
+#endif
     CPSIE         i                     /* enable interrupts (clear PRIMASK) */
-#else                                   /* M3/M4/M7 */
-    MOVS          r0,#0
-    MSR           BASEPRI,r0            /* enable interrupts (clear BASEPRI) */
-    DSB                                 /* ARM Erratum 838869 */
-#endif                                  /* M3/M4/M7 */
     BX            lr                    /* return to the next task */
 }
 #endif
@@ -305,41 +322,60 @@ void PendSV_Handler(void)
 {
     __asm volatile
     (
-#if (__TARGET_ARCH_THUMB == 3)          /* Cortex-M0/M0+/M1 (v6-M, v6S-M)? */
-    "CPSID   i                      \n" /* disable interrupts (set PRIMASK) */
-#else
-    "MOVS    r0,#0x3F               \n"
-    "CPSID   i                      \n"  /* selectively disable interrutps with BASEPRI */
-    "MSR     BASEPRI,r0             \n"  /* apply the workaround the Cortex-M7 erraturm */
-    "CPSIE   i                      \n"  /* 837070, see SDEN-1068427. */
-#endif                                  /* M3/M4/M7 */
-
+    "CPSID         i                \n" /* disable interrupts (set PRIMASK) */
     "LDR           r1,=eos_current  \n"  /* if (eos_current != 0) { */
     "LDR           r1,[r1,#0x00]    \n"
-    "CBZ           r1,restore       \n"
 
-    "PUSH          {r4-r11}         \n"  /*     push r4-r11 into stack */
+#if (__TARGET_ARCH_THUMB == 3)          /* Cortex-M0/M0+/M1 (v6-M, v6S-M)? */
+    "CMP           r1, #0           \n"
+    "BEQ           PendSV_restore   \n"
+    "NOP                            \n"
+    "PUSH          {r4-r7}          \n" /*      push r4-r11 into stack */
+    "MOV           r4, r8           \n"
+    "MOV           r5, r9           \n"
+    "MOV           r6, r10          \n"
+    "MOV           r7, r11          \n"
+    "PUSH          {r4-r7}          \n"
+#else
+    "CBZ           r1,restore       \n"
+    "PUSH          {r4-r11}         \n"
+#endif
+
     "LDR           r1,=eos_current  \n"  /*     eos_current->sp = sp; */
     "LDR           r1,[r1,#0x00]    \n"
+
+#if (__TARGET_ARCH_THUMB == 3)          /* Cortex-M0/M0+/M1 (v6-M, v6S-M)? */
+    "MOV           r2, SP           \n"
+    "STR           r2,[r1,#0x00]    \n"  /* } */
+#else
     "STR           sp,[r1,#0x00]    \n"  /* } */
-    
+#endif
+
     "restore: LDR r1,=eos_next      \n"  /* sp = eos_next->sp; */
     "LDR           r1,[r1,#0x00]    \n"
+#if (__TARGET_ARCH_THUMB == 3)          /* Cortex-M0/M0+/M1 (v6-M, v6S-M)? */
+    "LDR           r0,[r1,#0x00]    \n"
+    "MOV           SP, r0           \n"
+#else
     "LDR           sp,[r1,#0x00]    \n"
+#endif
 
     "LDR           r1,=eos_next     \n"  /* eos_current = eos_next; */
     "LDR           r1,[r1,#0x00]    \n"
     "LDR           r2,=eos_current  \n"
     "STR           r1,[r2,#0x00]    \n"
-    "POP           {r4-r11}         \n"  /* pop registers r4-r11 */
 #if (__TARGET_ARCH_THUMB == 3)          /* Cortex-M0/M0+/M1 (v6-M, v6S-M)? */
+    "POP           {r4-r7}          \n"
+    "MOV           r8, r4           \n"
+    "MOV           r9, r5           \n"
+    "MOV           r10,r6           \n"
+    "MOV           r11,r7           \n"
+    "POP           {r4-r7}          \n"
+#else
+    "POP           {r4-r11}         \n"  /* pop registers r4-r11 */
+#endif
     "CPSIE         i                \n"  /* enable interrupts (clear PRIMASK) */
-#else                                   /* M3/M4/M7 */
-    "MOVS          r0,#0           \n"
-    "MSR           BASEPRI,r0      \n"  /* enable interrupts (clear BASEPRI) */
-    "DSB                           \n"  /* ARM Erratum 838869 */
-#endif                                  /* M3/M4/M7 */
-    "BX            lr              \n"   /* return to the next task */
+    "BX            lr               \n"   /* return to the next task */
     );
 }
 #endif
@@ -353,27 +389,25 @@ static void task_entry_idle(void)
 }
 
 static int32_t critical_count = 0;
-void eos_critical_enter(void)
+#if (defined __CC_ARM)
+inline void eos_critical_enter(void)
+#elif ((defined __GNUC__) || (defined __ICCARM__))
+__attribute__((always_inline)) inline void eos_critical_enter(void)
+#endif
 {
 #if (defined __CC_ARM)
     __disable_irq();
 #elif ((defined __GNUC__) || (defined __ICCARM__))
-    __asm volatile
-    (
-#if (__TARGET_ARCH_THUMB == 3)          /* Cortex-M0/M0+/M1 (v6-M, v6S-M)? */
-    "CPSID   i                      \n" /* disable interrupts (set PRIMASK) */
-#else
-    "MOVS    r0,#0x3F               \n"
-    "CPSID   i                      \n"  /* selectively disable interrutps with BASEPRI */
-    "MSR     BASEPRI,r0             \n"  /* apply the workaround the Cortex-M7 erraturm */
-    "CPSIE   i                      \n"  /* 837070, see SDEN-1068427. */
-#endif                                  /* M3/M4/M7 */
-    );
+    __asm volatile ("cpsid i" : : : "memory");
 #endif
     critical_count ++;
 }
 
-void eos_critical_exit(void)
+#if (defined __CC_ARM)
+inline void eos_critical_exit(void)
+#elif ((defined __GNUC__) || (defined __ICCARM__))
+__attribute__((always_inline)) inline void eos_critical_exit(void)
+#endif
 {
     critical_count --;
     if (critical_count <= 0) {
@@ -381,16 +415,7 @@ void eos_critical_exit(void)
 #if (defined __CC_ARM)
         __enable_irq();
 #elif ((defined __GNUC__) || (defined __ICCARM__))
-        __asm volatile
-        (
-#if (__TARGET_ARCH_THUMB == 3)          /* Cortex-M0/M0+/M1 (v6-M, v6S-M)? */
-        "CPSIE         i                \n"  /* enable interrupts (clear PRIMASK) */
-#else                                   /* M3/M4/M7 */
-        "MOVS          r0,#0           \n"
-        "MSR           BASEPRI,r0      \n"  /* enable interrupts (clear BASEPRI) */
-        "DSB                           \n"  /* ARM Erratum 838869 */
-#endif                                  /* M3/M4/M7 */
-        );
+        __asm volatile ("cpsie i" : : : "memory");
 #endif
     }
 }

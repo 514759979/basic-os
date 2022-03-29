@@ -1,5 +1,5 @@
 /* include ------------------------------------------------------------------ */
-#include "stm32f4xx.h"
+#include "stm32f0xx.h"
 #include "eventos.h"
 
 /* task entry --------------------------------------------------------------- */
@@ -68,15 +68,4 @@ static void task_entry_test_exit(void)
     }
     
     eos_task_exit();
-}
-
-void SysTick_Handler(void)
-{
-    eos_tick();
-}
-
-void HardFault_Handler(void)
-{
-    while (1) {
-    }
 }
