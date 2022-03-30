@@ -3,9 +3,9 @@
 #include "eventos.h"
 
 /* task entry --------------------------------------------------------------- */
-static void task_entry_led(void);
-static void task_entry_count(void);
-static void task_entry_test_exit(void);
+static void task_entry_led(void *parameter);
+static void task_entry_count(void *parameter);
+static void task_entry_test_exit(void *parameter);
 
 /* data --------------------------------------------------------------------- */
 static uint64_t stack_led[32];
@@ -24,13 +24,14 @@ int main(void)
         while (1);
     
     static uint64_t stack_idle[32];
-    eos_init(stack_idle, sizeof(stack_idle));       // EventOS初始化
+    static uint64_t stack_timer[32];
+    eos_init(stack_idle, stack_timer, sizeof(stack_idle));       // EventOS初始化
     
     // 启动LED闪烁任务
-    eos_task_start(&led, task_entry_led, 1, stack_led, sizeof(stack_led));
+    eos_task_start(&led, task_entry_led, 2, stack_led, sizeof(stack_led));
 
     // 启动计数任务
-    eos_task_start(&count, task_entry_count, 2, stack_count, sizeof(stack_count));
+    eos_task_start(&count, task_entry_count, 3, stack_count, sizeof(stack_count));
 
     eos_run();                                      // EventOS启动
 
@@ -38,9 +39,9 @@ int main(void)
 }
 
 uint8_t led_status = 0;
-static void task_entry_led(void)
+static void task_entry_led(void *parameter)
 {
-    eos_task_start(&test_exit, task_entry_test_exit, 3, stack_test_exit, sizeof(stack_test_exit));
+    eos_task_start(&test_exit, task_entry_test_exit, 4, stack_test_exit, sizeof(stack_test_exit));
     
     while (1) {
         led_status = 0;
@@ -51,7 +52,7 @@ static void task_entry_led(void)
 }
 
 uint32_t count_num = 0;
-static void task_entry_count(void)
+static void task_entry_count(void *parameter)
 {
     while (1) {
         count_num ++;
@@ -60,7 +61,7 @@ static void task_entry_count(void)
 }
 
 uint32_t count_num_exit = 0;
-static void task_entry_test_exit(void)
+static void task_entry_test_exit(void *parameter)
 {
     for (int i = 0; i < 10 ; i ++) {
         count_num_exit ++;

@@ -44,10 +44,7 @@ extern "C" {
 
 /* Config ------------------------------------------------------------------- */
 // 支持的最大的线程数
-#define EOS_MAX_TASKS                           4
-
-// 支持的最大的软定时器数
-#define EOS_MAX_TIMERS                          4
+#define EOS_MAX_TASKS                           6
 
 #define EOS_TICK_MS                             1
 
@@ -58,7 +55,12 @@ extern "C" {
 #endif
 
 /* Data structure ----------------------------------------------------------- */
-typedef void (* eos_func_t)(void);
+enum {
+    EOS_OK                          = 0,
+
+};
+
+typedef void (* eos_func_t)(void *parameter);
 
 // Task
 typedef struct eos_actor {
@@ -72,13 +74,16 @@ typedef struct eos_timer {
     uint32_t time;
     uint32_t time_out;
     eos_func_t callback;
+    void *parameter;
+    uint32_t id                     : 10;
     uint32_t domain                 : 8;
     uint32_t oneshoot               : 1;
+    uint32_t running                : 1;
 } eos_timer_t;
 
 /* 任务相关 ------------------------------------------------------------------ */
 // 初始化
-void eos_init(void *stack_idle, uint32_t size);
+void eos_init(void *stack_idle, void *stack_timer, uint32_t size);
 // 启动系统
 void eos_run(void);
 // 系统当前时间
@@ -98,16 +103,17 @@ void eos_task_start(eos_task_t * const me,
 
 /* 软定时器 ------------------------------------------------------------------ */
 // 启动软定时器
-int32_t eos_timer_start(eos_timer_t const *me,
-                        uint32_t time,
+int32_t eos_timer_start(eos_timer_t * const me,
+                        uint32_t time_ms,
                         bool oneshoot,
-                        eos_func_t callback);
+                        eos_func_t callback,
+                        void *parameter);
 // 暂停
 void eos_timer_pause(uint16_t timer_id);
 // 继续
 void eos_timer_continue(uint16_t timer_id);
-// 停止
-void eos_timer_stop(uint16_t timer_id);
+// 删除
+void eos_timer_delete(uint16_t timer_id);
 // 重启
 void eos_timer_reset(uint16_t timer_id);
 
