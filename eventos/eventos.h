@@ -46,8 +46,10 @@ extern "C" {
 // 支持的最大的线程数
 #define EOS_MAX_TASKS                           6
 
+// 时钟滴答的毫秒数
 #define EOS_TICK_MS                             1
 
+// 是否使用断言
 #define EOS_USE_ASSERT                          1
 
 #if (EOS_MAX_TASKS > 32)
@@ -60,7 +62,7 @@ enum {
 
 };
 
-typedef void (* eos_func_t)(void *parameter);
+typedef void (* eos_func_t)(void);
 
 // Task
 typedef struct eos_actor {
@@ -74,7 +76,6 @@ typedef struct eos_timer {
     uint32_t time;
     uint32_t time_out;
     eos_func_t callback;
-    void *parameter;
     uint32_t id                     : 10;
     uint32_t domain                 : 8;
     uint32_t oneshoot               : 1;
@@ -82,19 +83,19 @@ typedef struct eos_timer {
 } eos_timer_t;
 
 /* 任务相关 ------------------------------------------------------------------ */
-// 初始化
-void eos_init(void *stack_idle, void *stack_timer, uint32_t size);
+// 初始化，建议在main函数中调用。
+void eos_init(void *stack_idle, uint32_t size);
 // 启动系统
 void eos_run(void);
 // 系统当前时间
 uint64_t eos_time(void);
-// 系统滴答
+// 系统滴答，建议在SysTick中断里调用，也可在普通定时器中断中调用。
 void eos_tick(void);
-// 任务内延时
+// 任务内延时，任务函数中调用，不允许在定时器的回调函数调用，不允许在空闲回调函数中调用。
 void eos_delay_ms(uint32_t time_ms);
-// 退出任务
+// 退出任务，任务函数中调用。
 void eos_task_exit(void);
-// 启动任务
+// 启动任务，main函数或者任务函数中调用。
 void eos_task_start(eos_task_t * const me,
                     eos_func_t func,
                     uint8_t priority,
@@ -102,19 +103,18 @@ void eos_task_start(eos_task_t * const me,
                     uint32_t stack_size);
 
 /* 软定时器 ------------------------------------------------------------------ */
-// 启动软定时器
+// 启动软定时器，允许在中断中调用。
 int32_t eos_timer_start(eos_timer_t * const me,
                         uint32_t time_ms,
                         bool oneshoot,
-                        eos_func_t callback,
-                        void *parameter);
-// 暂停
-void eos_timer_pause(uint16_t timer_id);
-// 继续
-void eos_timer_continue(uint16_t timer_id);
-// 删除
+                        eos_func_t callback);
+// 删除软定时器，允许在中断中调用。
 void eos_timer_delete(uint16_t timer_id);
-// 重启
+// 暂停软定时器，允许在中断中调用。
+void eos_timer_pause(uint16_t timer_id);
+// 继续软定时器，允许在中断中调用。
+void eos_timer_continue(uint16_t timer_id);
+// 重启软定时器的定时，允许在中断中调用。
 void eos_timer_reset(uint16_t timer_id);
 
 /* port --------------------------------------------------------------------- */
@@ -124,7 +124,7 @@ void eos_port_assert(uint32_t error_id);
 // 空闲回调函数
 void eos_hook_idle(void);
 
-// 启动EventOS Nano的时候，所调用的回调函数
+// 启动EventOS Basic的时候，所调用的回调函数
 void eos_hook_start(void);
 
 #ifdef __cplusplus
