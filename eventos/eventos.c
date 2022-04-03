@@ -69,7 +69,7 @@ eos_t eos;
 static eos_task_t task_idle;
 
 /* macro -------------------------------------------------------------------- */
-#define LOG2(x) (32U - __builtin_clz(x))
+
 
 #define EOS_MS_NUM_30DAY                (2592000000U)
 #define EOS_MS_NUM_15DAY                (1296000000U)
@@ -79,6 +79,9 @@ static void eos_sheduler(void);
 static void task_entry_idle(void);
 static void eos_critical_enter(void);
 static void eos_critical_exit(void);
+static int eos_builtin_clz(uint32_t type);
+
+#define LOG2(x) (32U - eos_builtin_clz(x))
 
 /* public function ---------------------------------------------------------- */
 void eos_init(void *stack_idle, uint32_t size)
@@ -210,7 +213,9 @@ static void eos_sheduler(void)
     /* eos_next = ... */
     eos_next = eos.task[LOG2(eos.exist & (~eos.delay)) - 1];
     /* trigger PendSV, if needed */
-    if (eos_next != eos_current) {
+    eos_task_t *current = eos_current;
+    eos_task_t *next = eos_next;
+    if (next != current) {
         *(uint32_t volatile *)0xE000ED04 = (1U << 28);
     }
     eos_critical_exit();
@@ -574,6 +579,18 @@ static void task_entry_idle(void)
             eos_hook_idle();
         }
     }
+}
+
+static int eos_builtin_clz(uint32_t type)
+{
+    int num = 0;
+    type |= 1;
+    while (!(type & 0x80000000)) {
+        num += 1;
+        type <<= 1;
+    }
+    
+    return num;
 }
 
 static int32_t critical_count = 0;
