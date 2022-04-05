@@ -52,6 +52,12 @@ extern "C" {
 // 是否使用断言
 #define EOS_USE_ASSERT                          1
 
+// 是否统计堆栈使用率
+#define EOS_USE_STACK_USAGE                     1
+
+// 是否统计CPU使用率
+#define EOS_USE_CPU_USAGE                       1
+
 #if (EOS_MAX_TASKS > 32)
 #error The number of tasks can NOT be larger than 32 !
 #endif
@@ -67,10 +73,16 @@ typedef void (* eos_func_t)(void);
 // Task
 typedef struct eos_actor {
     uint32_t *sp;
+    void *stack;
     uint32_t timeout;
-    uint32_t priority              : 5;
+    uint32_t size                   : 16;
+    uint32_t usage                  : 8;
+    uint32_t cpu_usage              : 8;
+    uint32_t cpu_usage_count        : 16;
+    uint32_t priority               : 5;
 } eos_task_t;
 
+// Timer
 typedef struct eos_timer {
     struct eos_timer *next;
     uint32_t time;
@@ -116,6 +128,19 @@ void eos_timer_pause(uint16_t timer_id);
 void eos_timer_continue(uint16_t timer_id);
 // 重启软定时器的定时，允许在中断中调用。
 void eos_timer_reset(uint16_t timer_id);
+
+/* 统计功能 ------------------------------------------------------------------ */
+#if (EOS_USE_STACK_USAGE != 0)
+// 任务的堆栈使用率
+uint8_t eos_task_stack_usage(uint8_t priority);
+#endif
+
+#if (EOS_USE_CPU_USAGE != 0)
+// 任务的CPU使用率
+uint8_t eos_task_cpu_usage(uint8_t priority);
+// 监控函数，放进一个单独的定时器中断函数，中断频率为SysTick的10-20倍。
+void eos_cpu_usage_monitor(void);
+#endif
 
 /* port --------------------------------------------------------------------- */
 void eos_port_assert(uint32_t error_id);

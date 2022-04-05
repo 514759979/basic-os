@@ -61,6 +61,7 @@ typedef struct eos_tag {
     uint32_t time;
     uint32_t time_out_min;
     uint64_t time_offset;
+    uint32_t cpu_usage_count;
     uint32_t timer_count                : 16;
     uint32_t timer_id_count             : 10;
 } eos_t;
@@ -69,8 +70,6 @@ eos_t eos;
 static eos_task_t task_idle;
 
 /* macro -------------------------------------------------------------------- */
-
-
 #define EOS_MS_NUM_30DAY                (2592000000U)
 #define EOS_MS_NUM_15DAY                (1296000000U)
 
@@ -119,11 +118,26 @@ void eos_task_start(eos_task_t * const me,
     EOS_ASSERT(priority < EOS_MAX_TASKS);
     EOS_ASSERT(eos.task[priority] == (void *)0);
     
+    eos_critical_enter();
+    uint32_t mod = (uint32_t)me->stack % 4;
+    if (mod == 0) {
+        me->stack = stack_addr;
+        me->size = stack_size;
+    }
+    else {
+        me->stack = (void *)((uint32_t)stack_addr - mod);
+        me->size = stack_size - 4;
+    }
+    /* pre-fill the unused part of the stack with 0xDEADBEEF */
+    for (uint32_t i = 0; i < (me->size / 4); i ++) {
+        ((uint32_t *)me->stack)[i] = 0xDEADBEEFU;
+    }
+    eos_critical_exit();
+    
     /* round down the stack top to the 8-byte boundary
      * NOTE: ARM Cortex-M stack grows down from hi -> low memory
      */
     uint32_t *sp = (uint32_t *)((((uint32_t)stack_addr + stack_size) >> 3U) << 3U);
-    uint32_t *stk_limit;
 
     *(-- sp) = (uint32_t)(1 << 24);            /* xPSR, Set Bit24(Thumb Mode) to 1. */
     *(-- sp) = (uint32_t)func;                 /* the entry function (PC) */
@@ -145,14 +159,6 @@ void eos_task_start(eos_task_t * const me,
 
     /* save the top of the stack in the task's attibute */
     me->sp = sp;
-
-    /* round up the bottom of the stack to the 8-byte boundary */
-    stk_limit = (uint32_t *)(((((uint32_t)stack_addr - 1U) >> 3U) + 1U) << 3U);
-
-    /* pre-fill the unused part of the stack with 0xDEADBEEF */
-    for (sp = sp - 1U; sp >= stk_limit; --sp) {
-        *sp = 0xDEADBEEFU;
-    }
 
     eos_critical_enter();
     me->priority = priority;
@@ -225,7 +231,7 @@ uint64_t eos_time(void)
 {
     eos_critical_enter();
     uint64_t time_offset = eos.time_offset;
-    eos_critical_enter();
+    eos_critical_exit();
 
     return (time_offset + eos.time);
 }
@@ -358,6 +364,50 @@ void eos_timer_reset(uint16_t timer_id)
     // not found.
     EOS_ASSERT(0);
 }
+
+/* 统计功能 ------------------------------------------------------------------ */
+// 任务的堆栈使用率
+#if (EOS_USE_STACK_USAGE != 0)
+uint8_t eos_task_stack_usage(uint8_t priority)
+{
+    EOS_ASSERT(priority < EOS_MAX_TASKS);
+    EOS_ASSERT(eos.task[priority] != (eos_task_t *)0);
+
+    return eos.task[priority]->usage;
+}
+#endif
+
+// 任务的CPU使用率
+#if (EOS_USE_CPU_USAGE != 0)
+uint8_t eos_task_cpu_usage(uint8_t priority)
+{
+    EOS_ASSERT(priority < EOS_MAX_TASKS);
+    EOS_ASSERT(eos.task[priority] != (eos_task_t *)0);
+
+    return eos.task[priority]->cpu_usage;
+}
+
+// 监控函数，放进一个单独的定时器中断函数，中断频率为SysTick的10-20倍。
+void eos_cpu_usage_monitor(void)
+{
+    uint8_t usage;
+
+    // CPU使用率的计算
+    eos.cpu_usage_count ++;
+    eos_current->cpu_usage_count ++;
+    if (eos.cpu_usage_count >= 10000) {
+        for (uint8_t i = 0; i < EOS_MAX_TASKS; i ++) {
+            if (eos.task[i] != (eos_task_t *)0) {
+                usage = eos.task[i]->cpu_usage_count * 100 / eos.cpu_usage_count;
+                eos.task[i]->cpu_usage = usage;
+                eos.task[i]->cpu_usage_count = 0;
+            }
+        }
+        
+        eos.cpu_usage_count = 0;
+    }
+}
+#endif
 
 /* Interrupt service function ----------------------------------------------- */
 #if (defined __CC_ARM)
@@ -501,6 +551,28 @@ void PendSV_Handler(void)
 static void task_entry_idle(void)
 {
     while (1) {
+#if (EOS_USE_STACK_USAGE != 0)
+        // 堆栈使用率的计算
+        uint8_t usage = 0;
+        uint32_t *stack;
+        uint32_t size_used = 0;
+        for (uint8_t i = 0; i < EOS_MAX_TASKS; i ++) {
+            if (eos.task[i] != (eos_task_t *)0) {
+                size_used = 0;
+                stack = (uint32_t *)eos.task[i]->stack;
+                for (uint32_t m = 0; m < (eos.task[i]->size / 4); m ++) {
+                    if (stack[m] == 0xDEADBEEFU) {
+                        size_used += 4;
+                    }
+                    else {
+                        break;
+                    }
+                }
+                usage = 100 - (size_used * 100 / eos.task[i]->size);
+                eos.task[i]->usage = usage;
+            }
+        }
+#endif
         /* check all the task are timeout or not. */
         uint32_t working_set, bit;
         working_set = eos.delay;
