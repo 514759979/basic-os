@@ -190,6 +190,10 @@ void eos_tick(void)
 
 void eos_delay_ms(uint32_t time_ms)
 {
+    if (time_ms == 0) {
+        return;
+    }
+    
     EOS_ASSERT(time_ms <= EOS_MS_NUM_30DAY);
 
     /* never call eos_delay_ms in the idle task. */
