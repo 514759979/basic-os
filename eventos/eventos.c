@@ -40,10 +40,14 @@ extern "C" {
 
 /* assert ------------------------------------------------------------------- */
 #if (EOS_USE_ASSERT != 0)
-#define EOS_ASSERT(test_) do { if (!(test_)) {                                 \
-        eos_critical_enter();                                             \
-        eos_port_assert(__LINE__);                                             \
-    } } while (0)
+#define EOS_ASSERT(test_)                                                      \
+    do {                                                                       \
+        if (!(test_))                                                          \
+        {                                                                      \
+            eos_critical_enter();                                              \
+            eos_port_assert(__LINE__);                                         \
+        }                                                                      \
+    } while (0)
 #else
 #define EOS_ASSERT(test_)               ((void)0)
 #endif
@@ -52,15 +56,25 @@ extern "C" {
 eos_task_t *volatile eos_current;
 eos_task_t *volatile eos_next;
 
-typedef struct eos_tag {
-    eos_task_t * task[EOS_MAX_TASKS];
-    eos_timer_t * timers;
+enum
+{
+    EosTaskState_Ready = 0,
+    EosTaskState_Running,
+    EosTaskState_Blocked,
+    EosTaskState_Suspended,
 
-    uint32_t delay;
-    uint32_t exist;
+    EosTaskState_Max,
+};
+
+typedef struct eos_tag
+{
+    eos_task_t * list;
+    eos_timer_t * timers;
+    uint8_t id_count;
+
     uint32_t time;
     uint32_t time_out_min;
-    uint64_t time_offset;
+    uint32_t time_offset;
     uint32_t cpu_usage_count;
     uint32_t timer_count                : 16;
     uint32_t timer_id_count             : 10;
@@ -78,9 +92,6 @@ static void eos_sheduler(void);
 static void task_entry_idle(void);
 static void eos_critical_enter(void);
 static void eos_critical_exit(void);
-static int eos_builtin_clz(uint32_t type);
-
-#define LOG2(x) (32U - eos_builtin_clz(x))
 
 /* public function ---------------------------------------------------------- */
 void eos_init(void *stack_idle, uint32_t size)
@@ -91,22 +102,19 @@ void eos_init(void *stack_idle, uint32_t size)
     *(uint32_t volatile *)0xE000ED20 |= (0xFFU << 16U);
 
     eos.time = 0;
-    eos.delay = 0;
     eos.time_offset = 0;
     eos.timer_id_count = 0;
     eos.timers = (eos_timer_t *)0;
     eos.time_out_min = UINT32_MAX;
+    eos.list = NULL;
 
-    eos_current = (void *)0;
+    eos_current = NULL;
     eos_next = &task_idle;
-    
-    for (int i = 0; i < EOS_MAX_TASKS; i ++) {
-        eos.task[i] = (void *)0;
-    }
+
     eos_critical_exit();
 
     // Start the idle task.
-    eos_task_start(&task_idle, task_entry_idle, 0, stack_idle, size);
+    eos_task_start(&task_idle, task_entry_idle, 1, stack_idle, size);
 }
 
 void eos_task_start(eos_task_t * const me,
@@ -115,21 +123,24 @@ void eos_task_start(eos_task_t * const me,
                     void *stack_addr,
                     uint32_t stack_size)
 {
-    EOS_ASSERT(priority < EOS_MAX_TASKS);
-    EOS_ASSERT(eos.task[priority] == (void *)0);
+    EOS_ASSERT(priority <= EOS_MAX_PRIORITY && priority != 0);
+    EOS_ASSERT(eos_current != &task_idle);
     
     eos_critical_enter();
     uint32_t mod = (uint32_t)me->stack % 4;
-    if (mod == 0) {
+    if (mod == 0)
+    {
         me->stack = stack_addr;
         me->size = stack_size;
     }
-    else {
+    else
+    {
         me->stack = (void *)((uint32_t)stack_addr - mod);
         me->size = stack_size - 4;
     }
     /* pre-fill the unused part of the stack with 0xDEADBEEF */
-    for (uint32_t i = 0; i < (me->size / 4); i ++) {
+    for (uint32_t i = 0; i < (me->size / 4); i ++)
+    {
         ((uint32_t *)me->stack)[i] = 0xDEADBEEFU;
     }
     eos_critical_exit();
@@ -161,17 +172,51 @@ void eos_task_start(eos_task_t * const me,
     me->sp = sp;
 
     eos_critical_enter();
-    me->priority = priority;
-    eos.task[priority] = me;
-    eos.exist |= (1 << priority);
+    me->state = EosTaskState_Ready;
+    me->state_bkp = EosTaskState_Max;
     
-    if (eos_current == &task_idle) {
-        eos_critical_exit();
-        eos_sheduler();
+    eos_task_t *list = eos.list;
+    
+    if (me == &task_idle)
+    {
+        me->priority = 0;
+        eos.list = me;
+        me->next = NULL;
+        me->prev = NULL;
     }
-    else {
-        eos_critical_exit();
+    else
+    {
+        me->priority = priority;
+        
+        // Insert into the task list from high-priority to low.
+        while (list != NULL)
+        {
+            /*  The first task's priority is low than the current task, insert
+                it at the head of the list. */
+            if (list->priority < priority && list->prev == NULL)
+            {
+                me->next = list;
+                me->prev = list->prev;
+                list->prev = me;
+                eos.list = me;
+                break;
+            }
+
+            /* Insert the task at the tail of the list. */
+            if ((list->priority >= priority && list->next->priority < priority))
+            {
+                me->next = list->next;
+                list->next = me;
+                me->next->prev = me;
+                me->prev = list;
+                break;
+            }
+
+            list = list->next;
+        }
     }
+    
+    eos_critical_exit();
 }
 
 void eos_run(void)
@@ -190,7 +235,8 @@ void eos_tick(void)
 
 void eos_delay_ms(uint32_t time_ms)
 {
-    if (time_ms == 0) {
+    if (time_ms == 0)
+    {
         return;
     }
     
@@ -201,7 +247,7 @@ void eos_delay_ms(uint32_t time_ms)
 
     eos_critical_enter();
     eos_current->timeout = eos.time + time_ms;
-    eos.delay |= (1U << (eos_current->priority));
+    eos_current->state = EosTaskState_Blocked;
     eos_critical_exit();
     
     eos_sheduler();
@@ -210,31 +256,127 @@ void eos_delay_ms(uint32_t time_ms)
 void eos_task_exit(void)
 {
     eos_critical_enter();
-    eos.task[eos_current->priority] = (void *)0;
-    eos.exist &= ~(1 << eos_current->priority);
+    // Find the task in the list
+    eos_task_t *list = eos.list;
+    eos_task_t *former = NULL;
+    while (list != NULL)
+    {
+        if (list == eos_current)
+        {
+            if (former == NULL)
+            {
+                eos.list = list->next;
+            }
+            else
+            {
+                former->next = list->next;
+            }
+            break;
+        }
+        list = list->next;
+    }
     eos_critical_exit();
     
     eos_sheduler();
 }
 
+void eos_task_yield(void)
+{
+    eos_critical_enter();
+    
+    eos_task_t *head = NULL, *tail = NULL;
+    eos_task_t *list = eos_current->next;
+    eos_task_t *next = eos_current;
+    tail = eos_current;
+    bool next_found = false;
+    while (list->priority == eos_current->priority)
+    {
+        if (list->state == EosTaskState_Ready &&
+            list->priority == eos_current->priority &&
+            next_found == false)
+        {
+            next = list;
+            next_found = true;
+        }
+        if (list->next->priority != eos_current->priority)
+        {
+            tail = list;
+            break;
+        }
+
+        list = list->next;
+    }
+
+    list = eos_current->prev;
+    head = eos_current;
+    while (list != NULL && list->priority == eos_current->priority)
+    {
+        if (list->state == EosTaskState_Ready &&
+            list->priority == eos_current->priority &&
+            next_found == false)
+        {
+            next = list;
+        }
+        if (list->prev->priority != eos_current->priority)
+        {
+            head = list;
+            break;
+        }
+        if (list->prev == NULL)
+        {
+            head = list;
+            break;
+        }
+
+        list = list->prev;
+    }
+
+    list = head;
+    do
+    {
+        list->state_bkp = list->state;
+        list->state = EosTaskState_Suspended;
+        list = list->next;
+    } while (list->prev != tail);
+
+    next->state = next->state_bkp;
+
+    eos_sheduler();
+
+    list = head;
+    do
+    {
+        list->state = list->state_bkp;
+        list = list->next;
+    } while (list->prev != tail);
+
+    eos_critical_exit();
+}
+
 static void eos_sheduler(void)
 {
     eos_critical_enter();
-    /* eos_next = ... */
-    eos_next = eos.task[LOG2(eos.exist & (~eos.delay)) - 1];
-    /* trigger PendSV, if needed */
-    eos_task_t *current = eos_current;
-    eos_task_t *next = eos_next;
-    if (next != current) {
-        *(uint32_t volatile *)0xE000ED04 = (1U << 28);
+    eos_task_t *list = eos.list;
+    while (list != NULL)
+    {
+        if (list->state == EosTaskState_Ready)
+        {
+            eos_next = list;
+            if (eos_next != eos_current)
+            {
+                *(uint32_t volatile *)0xE000ED04 = (1U << 28);
+            }
+            break;
+        }
+        list = list->next;
     }
     eos_critical_exit();
 }
 
-uint64_t eos_time(void)
+uint32_t eos_time(void)
 {
     eos_critical_enter();
-    uint64_t time_offset = eos.time_offset;
+    uint32_t time_offset = eos.time_offset;
     eos_critical_exit();
 
     return (time_offset + eos.time);
@@ -252,7 +394,8 @@ int32_t eos_timer_start(eos_timer_t * const me,
 
     // 检查重复
     eos_timer_t *list = eos.timers;
-    while (list != (eos_timer_t *)0) {
+    while (list != (eos_timer_t *)0)
+    {
         EOS_ASSERT(list != me);
         EOS_ASSERT(list->callback != callback);
         list = list->next;
@@ -270,7 +413,8 @@ int32_t eos_timer_start(eos_timer_t * const me,
     me->next = eos.timers;
     eos.timers = me;
     
-    if (eos.time_out_min > me->time_out) {
+    if (eos.time_out_min > me->time_out)
+    {
         eos.time_out_min = me->time_out;
     }
 
@@ -286,12 +430,15 @@ void eos_timer_pause(uint16_t timer_id)
     eos_timer_t *list = eos.timers;
     uint32_t time_out_min = UINT32_MAX;
     bool timer_id_existed = false;
-    while (list != (eos_timer_t *)0) {
-        if (list->id == timer_id) {
+    while (list != (eos_timer_t *)0)
+    {
+        if (list->id == timer_id)
+        {
             list->running = 0;
             timer_id_existed = true;
         }
-        else if (list->running != 0 && time_out_min > list->time_out) {
+        else if (list->running != 0 && time_out_min > list->time_out)
+        {
             time_out_min = list->time_out;
         }
         list = list->next;
@@ -308,10 +455,13 @@ void eos_timer_continue(uint16_t timer_id)
     eos_critical_enter();
 
     eos_timer_t *list = eos.timers;
-    while (list != (eos_timer_t *)0) {
-        if (list->id == timer_id) {
+    while (list != (eos_timer_t *)0)
+    {
+        if (list->id == timer_id)
+        {
             list->running = 1;
-            if (eos.time_out_min > list->time_out) {
+            if (eos.time_out_min > list->time_out)
+            {
                 eos.time_out_min = list->time_out;
             }
             eos_critical_exit();
@@ -330,13 +480,17 @@ void eos_timer_delete(uint16_t timer_id)
 
     eos_timer_t *list = eos.timers;
     eos_timer_t *last = (eos_timer_t *)0;
-    while (list != (eos_timer_t *)0) {
-        if (list->id == timer_id) {
+    while (list != (eos_timer_t *)0)
+    {
+        if (list->id == timer_id)
+        {
             list->running = 1;
-            if (last == (eos_timer_t *)0) {
+            if (last == (eos_timer_t *)0)
+            {
                 eos.timers = list->next;
             }
-            else {
+            else
+            {
                 last->next = list->next;
             }
             eos_critical_exit();
@@ -355,8 +509,10 @@ void eos_timer_reset(uint16_t timer_id)
     eos_critical_enter();
 
     eos_timer_t *list = eos.timers;
-    while (list != (eos_timer_t *)0) {
-        if (list->id == timer_id) {
+    while (list != (eos_timer_t *)0)
+    {
+        if (list->id == timer_id)
+        {
             list->running = 1;
             list->time_out = eos.time + list->time;
             eos_critical_exit();
@@ -372,23 +528,41 @@ void eos_timer_reset(uint16_t timer_id)
 /* 统计功能 ------------------------------------------------------------------ */
 // 任务的堆栈使用率
 #if (EOS_USE_STACK_USAGE != 0)
-uint8_t eos_task_stack_usage(uint8_t priority)
+uint8_t eos_task_stack_usage(const char *name)
 {
-    EOS_ASSERT(priority < EOS_MAX_TASKS);
-    EOS_ASSERT(eos.task[priority] != (eos_task_t *)0);
+    eos_task_t *list = eos.list;
+    while (list != NULL)
+    {
+        if (strcmp(list->name, name) == 0)
+        {
+            return list->usage;
+        }
+    }
 
-    return eos.task[priority]->usage;
+    // The task of the given name not found.
+    EOS_ASSERT(0);
+
+    return 0;
 }
 #endif
 
 // 任务的CPU使用率
 #if (EOS_USE_CPU_USAGE != 0)
-uint8_t eos_task_cpu_usage(uint8_t priority)
+uint8_t eos_task_cpu_usage(const char *name)
 {
-    EOS_ASSERT(priority < EOS_MAX_TASKS);
-    EOS_ASSERT(eos.task[priority] != (eos_task_t *)0);
+    eos_task_t *list = eos.list;
+    while (list != NULL)
+    {
+        if (strcmp(list->name, name) == 0)
+        {
+            return list->cpu_usage;
+        }
+    }
 
-    return eos.task[priority]->cpu_usage;
+    // The task of the given name not found.
+    EOS_ASSERT(0);
+
+    return 0;
 }
 
 // 监控函数，放进一个单独的定时器中断函数，中断频率为SysTick的10-20倍。
@@ -399,15 +573,15 @@ void eos_cpu_usage_monitor(void)
     // CPU使用率的计算
     eos.cpu_usage_count ++;
     eos_current->cpu_usage_count ++;
-    if (eos.cpu_usage_count >= 10000) {
-        for (uint8_t i = 0; i < EOS_MAX_TASKS; i ++) {
-            if (eos.task[i] != (eos_task_t *)0) {
-                usage = eos.task[i]->cpu_usage_count * 100 / eos.cpu_usage_count;
-                eos.task[i]->cpu_usage = usage;
-                eos.task[i]->cpu_usage_count = 0;
-            }
+    if (eos.cpu_usage_count >= 10000)
+    {
+        eos_task_t *list = eos.list;
+        while (list != NULL)
+        {
+            list->cpu_usage = list->cpu_usage_count * 100 / eos.cpu_usage_count;
+            list->cpu_usage_count = 0;
+            list = list->next;
         }
-        
         eos.cpu_usage_count = 0;
     }
 }
@@ -422,7 +596,8 @@ __asm void PendSV_Handler(void)
 
     CPSID         i                     /* disable interrupts (set PRIMASK) */
 
-    LDR           r1,=eos_current       /* if (eos_current != 0) { */
+    LDR           r1,=eos_current       /* if (eos_current != 0)
+    { */
     LDR           r1,[r1,#0x00]
 #if (__TARGET_ARCH_THUMB == 3)          /* Cortex-M0/M0+/M1 (v6-M, v6S-M)? */
     CMP           r1, #0
@@ -494,7 +669,8 @@ void PendSV_Handler(void)
     __asm volatile
     (
     "CPSID         i                \n" /* disable interrupts (set PRIMASK) */
-    "LDR           r1,=eos_current  \n"  /* if (eos_current != 0) { */
+    "LDR           r1,=eos_current  \n"  /* if (eos_current != 0)
+    { */
     "LDR           r1,[r1,#0x00]    \n"
 
 #if (__TARGET_ARCH_THUMB == 3)          /* Cortex-M0/M0+/M1 (v6-M, v6S-M)? */
@@ -554,84 +730,107 @@ void PendSV_Handler(void)
 /* private function --------------------------------------------------------- */
 static void task_entry_idle(void)
 {
-    while (1) {
+    eos_critical_enter();
+    
+    while (1)
+    {
+        eos_task_t *list;
 #if (EOS_USE_STACK_USAGE != 0)
         // 堆栈使用率的计算
         uint8_t usage = 0;
         uint32_t *stack;
         uint32_t size_used = 0;
-        for (uint8_t i = 0; i < EOS_MAX_TASKS; i ++) {
-            if (eos.task[i] != (eos_task_t *)0) {
-                size_used = 0;
-                stack = (uint32_t *)eos.task[i]->stack;
-                for (uint32_t m = 0; m < (eos.task[i]->size / 4); m ++) {
-                    if (stack[m] == 0xDEADBEEFU) {
-                        size_used += 4;
-                    }
-                    else {
-                        break;
-                    }
+        list = eos.list;
+        while (list != NULL)
+        {
+            size_used = 0;
+            stack = (uint32_t *)list->stack;
+            for (uint32_t m = 0; m < (list->size / 4); m ++)
+            {
+                if (stack[m] == 0xDEADBEEFU)
+                {
+                    size_used += 4;
                 }
-                usage = 100 - (size_used * 100 / eos.task[i]->size);
-                eos.task[i]->usage = usage;
+                else
+                {
+                    break;
+                }
             }
+            usage = 100 - (size_used * 100 / list->size);
+            list->usage = usage;
+            list = list->next;
         }
 #endif
         /* check all the task are timeout or not. */
-        uint32_t working_set, bit;
-        working_set = eos.delay;
-        while (working_set != 0U) {
-            eos_task_t *t = eos.task[LOG2(working_set) - 1];
-            EOS_ASSERT(t != (eos_task_t *)0);
-            EOS_ASSERT(((eos_task_t *)t)->timeout != 0U);
-
-            bit = (1U << (((eos_task_t *)t)->priority));
-            if (eos.time >= ((eos_task_t *)t)->timeout) {
-                eos.delay &= ~bit;              /* remove from set */
-                eos_sheduler();
-            }
-            working_set &=~ bit;                /* remove from working set */
-        }
-
-        if (eos.time >= EOS_MS_NUM_15DAY) {
-            // Adjust all task daley timing.
-            for (uint32_t i = 1; i < EOS_MAX_TASKS; i ++) {
-                if (eos.task[i] != (void *)0 && ((eos.delay & (1 << i)) != 0)) {
-                    eos.task[i]->timeout -= eos.time;
+        list = eos.list;
+        bool sheduler_en = false;
+        while (list != NULL)
+        {
+            if (list->state == EosTaskState_Blocked)
+            {
+                if (eos.time >= list->timeout)
+                {
+                    list->state = EosTaskState_Ready;
+                    sheduler_en = true;
                 }
             }
+
+            list = list->next;
+        }
+        if (sheduler_en == true)
+        {
+            eos_critical_exit();
+            eos_sheduler();
             eos_critical_enter();
-            // Adjust all timmer's timing.
-            eos_timer_t *list = eos.timers;
-            while (list != (eos_timer_t *)0) {
-                if (list->running != 0) {
-                    list->time_out -= eos.time;
+        }
+
+        if (eos.time >= EOS_MS_NUM_15DAY)
+        {
+            list = eos.list;
+            while (list != NULL)
+            {
+                if (list->state == EosTaskState_Blocked)
+                {
+                    list->timeout -= eos.time;
                 }
                 list = list->next;
             }
+            
+            // Adjust all timmer's timing.
+            eos_timer_t *list_tim = eos.timers;
+            while (list_tim != (eos_timer_t *)0)
+            {
+                if (list_tim->running != 0)
+                {
+                    list_tim->time_out -= eos.time;
+                }
+                list_tim = list_tim->next;
+            }
             eos.time_out_min -= eos.time;
-            eos_critical_exit();
 
             eos.time_offset += eos.time;
             eos.time = 0;
         }
 
         // if any timer is timeout
-        if (eos.time >= eos.time_out_min) {
-            eos_critical_enter();
-
+        if (eos.time >= eos.time_out_min)
+        {
             eos_timer_t *list;
             // Find the time-out timers and excute the handlers.
             list = eos.timers;
-            while (list != (eos_timer_t *)0) {
-                if (list->running != 0 && eos.time >= list->time_out) {
+            while (list != (eos_timer_t *)0)
+            {
+                if (list->running != 0 && eos.time >= list->time_out)
+                {
                     eos_critical_exit();
                     list->callback();
                     eos_critical_enter();
-                    if (list->oneshoot == 0) {
+                    if (list->oneshoot == 0)
+                    {
                         list->time_out += list->time;
                     }
-                    else {
+                    else
+                    {
                         list->running = 0;
                     }
                 }
@@ -640,33 +839,24 @@ static void task_entry_idle(void)
             // Recalculate the minimum timeout value.
             list = eos.timers;
             uint32_t time_out_min = UINT32_MAX;
-            while (list != (eos_timer_t *)0) {
-                if (list->running != 0 && time_out_min > list->time_out) {
+            while (list != (eos_timer_t *)0)
+            {
+                if (list->running != 0 && time_out_min > list->time_out)
+                {
                     time_out_min = list->time_out;
                 }
                 list = list->next;
             }
             eos.time_out_min = time_out_min;
-
-            eos_critical_exit();
         }
         // if no timer is timeout
-        else {
+        else
+        {
+            eos_critical_exit();
             eos_hook_idle();
+            eos_critical_enter();
         }
     }
-}
-
-static int eos_builtin_clz(uint32_t type)
-{
-    int num = 0;
-    type |= 1;
-    while (!(type & 0x80000000)) {
-        num += 1;
-        type <<= 1;
-    }
-    
-    return num;
 }
 
 static int32_t critical_count = 0;
@@ -691,7 +881,8 @@ __attribute__((always_inline)) inline void eos_critical_exit(void)
 #endif
 {
     critical_count --;
-    if (critical_count <= 0) {
+    if (critical_count <= 0)
+    {
         critical_count = 0;
 #if (defined __CC_ARM)
         __enable_irq();

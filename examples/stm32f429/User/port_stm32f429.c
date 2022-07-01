@@ -10,8 +10,10 @@ void eos_port_assert(uint32_t error_id)
     }
 }
 
+uint32_t count_idle = 0;
 void eos_hook_idle(void)
 {
+    count_idle ++;
 }
 
 void eos_hook_start(void)

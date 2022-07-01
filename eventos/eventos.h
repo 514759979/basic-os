@@ -46,6 +46,9 @@ extern "C" {
 // 支持的最大的线程数
 #define EOS_MAX_TASKS                           6
 
+// 支持的最大优先级数
+#define EOS_MAX_PRIORITY                        8
+
 // 时钟滴答的毫秒数
 #define EOS_TICK_MS                             1
 
@@ -53,10 +56,10 @@ extern "C" {
 #define EOS_USE_ASSERT                          1
 
 // 是否统计堆栈使用率
-#define EOS_USE_STACK_USAGE                     1
+#define EOS_USE_STACK_USAGE                     0
 
 // 是否统计CPU使用率
-#define EOS_USE_CPU_USAGE                       1
+#define EOS_USE_CPU_USAGE                       0
 
 #if (EOS_MAX_TASKS > 32)
 #error The number of tasks can NOT be larger than 32 !
@@ -71,19 +74,26 @@ enum {
 typedef void (* eos_func_t)(void);
 
 // Task
-typedef struct eos_actor {
+typedef struct eos_task
+{
     uint32_t *sp;
+    struct eos_task *next;
+    struct eos_task *prev;
     void *stack;
+    const char *name;
     uint32_t timeout;
     uint32_t size                   : 16;
     uint32_t usage                  : 8;
     uint32_t cpu_usage              : 8;
     uint32_t cpu_usage_count        : 16;
     uint32_t priority               : 5;
+    uint32_t state;
+    uint32_t state_bkp;
 } eos_task_t;
 
 // Timer
-typedef struct eos_timer {
+typedef struct eos_timer
+{
     struct eos_timer *next;
     uint32_t time;
     uint32_t time_out;
@@ -100,13 +110,15 @@ void eos_init(void *stack_idle, uint32_t size);
 // 启动系统
 void eos_run(void);
 // 系统当前时间
-uint64_t eos_time(void);
+uint32_t eos_time(void);
 // 系统滴答，建议在SysTick中断里调用，也可在普通定时器中断中调用。
 void eos_tick(void);
 // 任务内延时，任务函数中调用，不允许在定时器的回调函数调用，不允许在空闲回调函数中调用。
 void eos_delay_ms(uint32_t time_ms);
 // 退出任务，任务函数中调用。
 void eos_task_exit(void);
+// 任务切换
+void eos_task_yield(void);
 // 启动任务，main函数或者任务函数中调用。
 void eos_task_start(eos_task_t * const me,
                     eos_func_t func,
@@ -132,12 +144,12 @@ void eos_timer_reset(uint16_t timer_id);
 /* 统计功能 ------------------------------------------------------------------ */
 #if (EOS_USE_STACK_USAGE != 0)
 // 任务的堆栈使用率
-uint8_t eos_task_stack_usage(uint8_t priority);
+uint8_t eos_task_stack_usage(const char *name);
 #endif
 
 #if (EOS_USE_CPU_USAGE != 0)
 // 任务的CPU使用率
-uint8_t eos_task_cpu_usage(uint8_t priority);
+uint8_t eos_task_cpu_usage(const char *name);
 // 监控函数，放进一个单独的定时器中断函数，中断频率为SysTick的10-20倍。
 void eos_cpu_usage_monitor(void);
 #endif
