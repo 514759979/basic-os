@@ -44,7 +44,7 @@ extern "C" {
 
 /* Config ------------------------------------------------------------------- */
 // 支持的最大的线程数
-#define EOS_MAX_TASKS                           6
+#define EOS_MAX_TASKS                           32
 
 // 支持的最大优先级数
 #define EOS_MAX_PRIORITY                        8

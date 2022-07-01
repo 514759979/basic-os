@@ -158,7 +158,7 @@ void eos_task_start(eos_task_t * const me,
     *(-- sp) = (uint32_t)0x03030303u;          /* R3 */
     *(-- sp) = (uint32_t)0x02020202u;          /* r2 */
     *(-- sp) = (uint32_t)0x01010101u;          /* R1 */
-    *(-- sp) = (uint32_t)0x00000000u;          /* r0 */
+    *(-- sp) = (uint32_t)parameter;            /* r0 */
     /* additionally, fake registers r4-r11 */
     *(-- sp) = (uint32_t)0x11111111u;          /* r11 */
     *(-- sp) = (uint32_t)0x10101010u;          /* r10 */

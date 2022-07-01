@@ -3,7 +3,7 @@
 
 #if (TEST_EN_02 != 0)
 
-#define TEST_02_TASK_MAX                    (4)
+#define TEST_02_TASK_MAX                    (10)
 #define TEST_02_STACK_SIZE                  (256)
 
 typedef struct task_info
