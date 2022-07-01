@@ -56,7 +56,7 @@ extern "C" {
 #define EOS_USE_ASSERT                          1
 
 // 是否统计堆栈使用率
-#define EOS_USE_STACK_USAGE                     0
+#define EOS_USE_STACK_USAGE                     1
 
 // 是否统计CPU使用率
 #define EOS_USE_CPU_USAGE                       1
@@ -120,6 +120,8 @@ void eos_delay_ms(uint32_t time_ms);
 void eos_task_exit(void);
 // 任务切换
 void eos_task_yield(void);
+// 获取当前任务句柄
+eos_task_t *eos_get_task(void);
 // 启动任务，main函数或者任务函数中调用。
 void eos_task_start(eos_task_t * const me,
                     eos_func_t func,
@@ -147,12 +149,12 @@ void eos_timer_reset(uint16_t timer_id);
 /* 统计功能 ------------------------------------------------------------------ */
 #if (EOS_USE_STACK_USAGE != 0)
 // 任务的堆栈使用率
-uint8_t eos_task_stack_usage(const char *name);
+uint8_t eos_task_stack_usage(eos_task_t * const me);
 #endif
 
 #if (EOS_USE_CPU_USAGE != 0)
 // 任务的CPU使用率
-uint8_t eos_task_cpu_usage(const char *name);
+uint8_t eos_task_cpu_usage(eos_task_t * const me);
 // 监控函数，放进一个单独的定时器中断函数，中断频率为SysTick的10-20倍。
 void eos_cpu_usage_monitor(void);
 #endif

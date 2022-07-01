@@ -433,6 +433,11 @@
               <FileType>1</FileType>
               <FilePath>..\..\..\test\test_02.c</FilePath>
             </File>
+            <File>
+              <FileName>test_03.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\..\test\test_03.c</FilePath>
+            </File>
           </Files>
         </Group>
       </Groups>

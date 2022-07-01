@@ -354,6 +354,11 @@ void eos_task_yield(void)
     eos_critical_exit();
 }
 
+eos_task_t *eos_get_task(void)
+{
+    return eos_current;
+}
+
 static void eos_sheduler(void)
 {
     eos_critical_enter();
@@ -531,41 +536,21 @@ void eos_timer_reset(uint16_t timer_id)
 /* 统计功能 ------------------------------------------------------------------ */
 // 任务的堆栈使用率
 #if (EOS_USE_STACK_USAGE != 0)
-uint8_t eos_task_stack_usage(const char *name)
+uint8_t eos_task_stack_usage(eos_task_t * const me)
 {
-    eos_task_t *list = eos.list;
-    while (list != NULL)
-    {
-        if (strcmp(list->name, name) == 0)
-        {
-            return list->usage;
-        }
-    }
+    EOS_ASSERT(me != NULL);
 
-    // The task of the given name not found.
-    EOS_ASSERT(0);
-
-    return 0;
+    return me->usage;
 }
 #endif
 
 // 任务的CPU使用率
 #if (EOS_USE_CPU_USAGE != 0)
-uint8_t eos_task_cpu_usage(const char *name)
+uint8_t eos_task_cpu_usage(eos_task_t * const me)
 {
-    eos_task_t *list = eos.list;
-    while (list != NULL)
-    {
-        if (strcmp(list->name, name) == 0)
-        {
-            return list->cpu_usage;
-        }
-    }
+    EOS_ASSERT(me != NULL);
 
-    // The task of the given name not found.
-    EOS_ASSERT(0);
-
-    return 0;
+    return me->cpu_usage;
 }
 
 // 监控函数，放进一个单独的定时器中断函数，中断频率为SysTick的10-20倍。
