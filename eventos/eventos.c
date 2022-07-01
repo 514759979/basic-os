@@ -89,7 +89,7 @@ static eos_task_t task_idle;
 
 /* private function --------------------------------------------------------- */
 static void eos_sheduler(void);
-static void task_entry_idle(void);
+static void task_entry_idle(void *parameter);
 static void eos_critical_enter(void);
 static void eos_critical_exit(void);
 
@@ -114,14 +114,15 @@ void eos_init(void *stack_idle, uint32_t size)
     eos_critical_exit();
 
     // Start the idle task.
-    eos_task_start(&task_idle, task_entry_idle, 1, stack_idle, size);
+    eos_task_start(&task_idle, task_entry_idle, 1, stack_idle, size, NULL);
 }
 
 void eos_task_start(eos_task_t * const me,
                     eos_func_t func,
                     uint8_t priority,
                     void *stack_addr,
-                    uint32_t stack_size)
+                    uint32_t stack_size,
+                    void *parameter)
 {
     EOS_ASSERT(priority <= EOS_MAX_PRIORITY && priority != 0);
     EOS_ASSERT(eos_current != &task_idle);
@@ -386,13 +387,14 @@ uint32_t eos_time(void)
 int32_t eos_timer_start(eos_timer_t * const me,
                         uint32_t time_ms,
                         bool oneshoot,
-                        eos_func_t callback)
+                        eos_func_t callback,
+                        void *parameter)
 {
     EOS_ASSERT(time_ms <= EOS_MS_NUM_30DAY);
 
     eos_critical_enter();
 
-    // 检查重复
+    // Check the timer is repeated.
     eos_timer_t *list = eos.timers;
     while (list != (eos_timer_t *)0)
     {
@@ -408,6 +410,7 @@ int32_t eos_timer_start(eos_timer_t * const me,
     me->id = eos.timer_id_count ++;
     me->oneshoot = oneshoot == false ? 0 : 1;
     me->running = 1;
+    me->parameter = parameter;
 
     // Add the timer to the list.
     me->next = eos.timers;
@@ -568,8 +571,6 @@ uint8_t eos_task_cpu_usage(const char *name)
 // 监控函数，放进一个单独的定时器中断函数，中断频率为SysTick的10-20倍。
 void eos_cpu_usage_monitor(void)
 {
-    uint8_t usage;
-
     // CPU使用率的计算
     eos.cpu_usage_count ++;
     eos_current->cpu_usage_count ++;
@@ -728,8 +729,10 @@ void PendSV_Handler(void)
 #endif
 
 /* private function --------------------------------------------------------- */
-static void task_entry_idle(void)
+static void task_entry_idle(void *parameter)
 {
+    (void)parameter;
+    
     eos_critical_enter();
     
     while (1)
@@ -823,7 +826,7 @@ static void task_entry_idle(void)
                 if (list->running != 0 && eos.time >= list->time_out)
                 {
                     eos_critical_exit();
-                    list->callback();
+                    list->callback(list->parameter);
                     eos_critical_enter();
                     if (list->oneshoot == 0)
                     {

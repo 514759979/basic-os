@@ -8,7 +8,7 @@ static uint8_t stack_idle[256];
 /* main function ------------------------------------------------------------ */
 int main(void)
 {
-    if (SysTick_Config(SystemCoreClock / 1000) != 0)
+    if (SysTick_Config(SystemCoreClock / 10000) != 0)
     {
         while (1);
     }
@@ -22,9 +22,17 @@ int main(void)
     return 0;
 }
 
+uint8_t tick_count = 0;
 void SysTick_Handler(void)
 {
-    eos_tick();
+    tick_count ++;
+    if (tick_count >= 10)
+    {
+        tick_count = 0;
+        eos_tick();
+    }
+    
+    eos_cpu_usage_monitor();
 }
 
 void HardFault_Handler(void)

@@ -59,7 +59,7 @@ extern "C" {
 #define EOS_USE_STACK_USAGE                     0
 
 // 是否统计CPU使用率
-#define EOS_USE_CPU_USAGE                       0
+#define EOS_USE_CPU_USAGE                       1
 
 #if (EOS_MAX_TASKS > 32)
 #error The number of tasks can NOT be larger than 32 !
@@ -71,7 +71,7 @@ enum {
 
 };
 
-typedef void (* eos_func_t)(void);
+typedef void (* eos_func_t)(void *parameter);
 
 // Task
 typedef struct eos_task
@@ -98,6 +98,7 @@ typedef struct eos_timer
     uint32_t time;
     uint32_t time_out;
     eos_func_t callback;
+    void *parameter;
     uint32_t id                     : 10;
     uint32_t domain                 : 8;
     uint32_t oneshoot               : 1;
@@ -124,14 +125,16 @@ void eos_task_start(eos_task_t * const me,
                     eos_func_t func,
                     uint8_t priority,
                     void *stack_addr,
-                    uint32_t stack_size);
+                    uint32_t stack_size,
+                    void *parameter);
 
 /* 软定时器 ------------------------------------------------------------------ */
 // 启动软定时器，允许在中断中调用。
 int32_t eos_timer_start(eos_timer_t * const me,
                         uint32_t time_ms,
                         bool oneshoot,
-                        eos_func_t callback);
+                        eos_func_t callback,
+                        void *parameter);
 // 删除软定时器，允许在中断中调用。
 void eos_timer_delete(uint16_t timer_id);
 // 暂停软定时器，允许在中断中调用。

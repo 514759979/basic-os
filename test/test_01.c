@@ -1,5 +1,8 @@
 #include "test.h"
 #include "eventos.h"
+#include <stdlib.h>
+
+#if (TEST_EN_01 != 0)
 
 static uint8_t stack_1[256];
 static uint8_t stack_2[256];
@@ -19,27 +22,27 @@ eos_task_t task6;
 eos_task_t task7;
 eos_task_t task8;
 
-static void task_entry_yield_1(void);
-static void task_entry_yield_2(void);
-static void task_entry_yield_3(void);
-static void task_entry_yield_4(void);
-static void task_entry_yield_5(void);
-static void task_entry_yield_6(void);
-static void task_entry_yield_7(void);
-static void task_entry_yield_8(void);
+static void task_entry_yield_1(void *parameter);
+static void task_entry_yield_2(void *parameter);
+static void task_entry_yield_3(void *parameter);
+static void task_entry_yield_4(void *parameter);
+static void task_entry_yield_5(void *parameter);
+static void task_entry_yield_6(void *parameter);
+static void task_entry_yield_7(void *parameter);
+static void task_entry_yield_8(void *parameter);
 
 uint32_t count_task[8];
 
 void test_start(void)
 {
-    eos_task_start(&task1, task_entry_yield_1, 2, stack_1, sizeof(stack_1));
-    eos_task_start(&task2, task_entry_yield_2, 2, stack_2, sizeof(stack_2));
-    eos_task_start(&task3, task_entry_yield_3, 2, stack_3, sizeof(stack_3));
-    eos_task_start(&task4, task_entry_yield_4, 3, stack_4, sizeof(stack_4));
-    eos_task_start(&task5, task_entry_yield_5, 2, stack_5, sizeof(stack_5));
-    eos_task_start(&task6, task_entry_yield_6, 2, stack_6, sizeof(stack_6));
-    eos_task_start(&task7, task_entry_yield_7, 2, stack_7, sizeof(stack_7));
-    eos_task_start(&task8, task_entry_yield_8, 1, stack_8, sizeof(stack_8));
+    eos_task_start(&task1, task_entry_yield_1, 2, stack_1, sizeof(stack_1), NULL);
+    eos_task_start(&task2, task_entry_yield_2, 2, stack_2, sizeof(stack_2), NULL);
+    eos_task_start(&task3, task_entry_yield_3, 2, stack_3, sizeof(stack_3), NULL);
+    eos_task_start(&task4, task_entry_yield_4, 3, stack_4, sizeof(stack_4), NULL);
+    eos_task_start(&task5, task_entry_yield_5, 2, stack_5, sizeof(stack_5), NULL);
+    eos_task_start(&task6, task_entry_yield_6, 2, stack_6, sizeof(stack_6), NULL);
+    eos_task_start(&task7, task_entry_yield_7, 2, stack_7, sizeof(stack_7), NULL);
+    eos_task_start(&task8, task_entry_yield_8, 1, stack_8, sizeof(stack_8), NULL);
     
     for (uint32_t i = 0; i < 8; i ++)
     {
@@ -49,8 +52,10 @@ void test_start(void)
 
 uint32_t count_yelid = 0;
 uint32_t count_sec = 0;
-void task_entry_yield_1(void)
+void task_entry_yield_1(void *parameter)
 {
+    (void)parameter;
+
     while (1)
     {
         count_yelid ++;
@@ -60,8 +65,10 @@ void task_entry_yield_1(void)
     }
 }
 
-void task_entry_yield_2(void)
+void task_entry_yield_2(void *parameter)
 {
+    (void)parameter;
+    
     while (1)
     {
         count_yelid ++;
@@ -70,8 +77,10 @@ void task_entry_yield_2(void)
     }
 }
 
-void task_entry_yield_3(void)
+void task_entry_yield_3(void *parameter)
 {
+    (void)parameter;
+
     while (1)
     {
         count_yelid ++;
@@ -80,8 +89,10 @@ void task_entry_yield_3(void)
     }
 }
 
-void task_entry_yield_4(void)
+void task_entry_yield_4(void *parameter)
 {
+    (void)parameter;
+
     while (1)
     {
         count_yelid ++;
@@ -93,8 +104,10 @@ void task_entry_yield_4(void)
     }
 }
 
-void task_entry_yield_5(void)
+void task_entry_yield_5(void *parameter)
 {
+    (void)parameter;
+
     while (1)
     {
         count_yelid ++;
@@ -103,8 +116,10 @@ void task_entry_yield_5(void)
     }
 }
 
-void task_entry_yield_6(void)
+void task_entry_yield_6(void *parameter)
 {
+    (void)parameter;
+
     while (1)
     {
         count_yelid ++;
@@ -113,8 +128,10 @@ void task_entry_yield_6(void)
     }
 }
 
-void task_entry_yield_7(void)
+void task_entry_yield_7(void *parameter)
 {
+    (void)parameter;
+
     while (1)
     {
         count_yelid ++;
@@ -123,8 +140,10 @@ void task_entry_yield_7(void)
     }
 }
 
-void task_entry_yield_8(void)
+void task_entry_yield_8(void *parameter)
 {
+    (void)parameter;
+
     while (1)
     {
         count_yelid ++;
@@ -136,3 +155,4 @@ void task_entry_yield_8(void)
     }
 }
 
+#endif

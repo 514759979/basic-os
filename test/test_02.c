@@ -1,84 +1,44 @@
-/* include ------------------------------------------------------------------ */
-#include "stm32f4xx.h"
+#include "test.h"
 #include "eventos.h"
 
-/* task entry --------------------------------------------------------------- */
-static void task_entry_led(void);
-static void task_entry_count(void);
-static void task_entry_test_exit(void);
+#if (TEST_EN_02 != 0)
+
+#define TEST_02_TASK_MAX                    (4)
+#define TEST_02_STACK_SIZE                  (256)
+
+typedef struct task_info
+{
+    eos_task_t task;
+    uint8_t stack[TEST_02_STACK_SIZE];
+    uint32_t count;
+} task_info_t;
+
+task_info_t task_info[TEST_02_TASK_MAX];
+static void task_entry_yield(void *parameter);
 static void eos_delay_block(uint32_t time_ms);
-static void eos_delay_10ms(void);
-static void eos_delay_50ms(void);
 
-/* data --------------------------------------------------------------------- */
-uint8_t stack_idle[256];
-
-uint8_t stack_led[256];
-eos_task_t led;
-
-uint8_t stack_count[256];
-eos_task_t count;
-
-uint64_t stack_test_exit[32];
-eos_task_t test_exit;
-
-/* main function ------------------------------------------------------------ */
-int main(void)
+void test_start(void)
 {
-    if (SysTick_Config(SystemCoreClock / 10000) != 0)
+    for (uint8_t i = 0; i < TEST_02_TASK_MAX; i ++)
     {
-        while (1);
-    }
-    
-    eos_init(stack_idle, sizeof(stack_idle));       // EventOS初始化
-    
-    // 启动LED闪烁任务
-    eos_task_start(&led, task_entry_led, 1, stack_led, sizeof(stack_led));
-
-    // 启动计数任务
-    eos_task_start(&count, task_entry_count, 1, stack_count, sizeof(stack_count));
-
-    eos_run();                                      // EventOS启动
-
-    return 0;
-}
-
-uint8_t led_status = 0;
-static void task_entry_led(void)
-{
-    eos_task_start(&test_exit, task_entry_test_exit, 1, stack_test_exit, sizeof(stack_test_exit));
-    
-    while (1) {
-        led_status = 0;
-        eos_delay_50ms();
-        eos_delay_ms(450);
-        led_status = 1;
-        eos_delay_50ms();
-        eos_delay_ms(450);
+        eos_task_start(&task_info[i].task,
+                       task_entry_yield,
+                       1,
+                       task_info[i].stack,
+                       sizeof(task_info[i].stack),
+                       &task_info[i]);
     }
 }
 
-uint32_t count_num = 0;
-static void task_entry_count(void)
+static void task_entry_yield(void *parameter)
 {
+    task_info_t *info = (task_info_t *)parameter;
     while (1)
     {
-        count_num ++;
-        eos_delay_block(2);
-        eos_delay_ms(10);
+        eos_delay_block(5);
+        info->count ++;
+        eos_task_yield();
     }
-}
-
-uint32_t count_num_exit = 0;
-static void task_entry_test_exit(void)
-{
-    for (int i = 0; i < 10 ; i ++)
-    {
-        count_num_exit ++;
-        eos_delay_ms(10);
-    }
-    
-    eos_task_exit();
 }
 
 static void eos_delay_block(uint32_t time_ms)
@@ -93,44 +53,4 @@ static void eos_delay_block(uint32_t time_ms)
     }
 }
 
-static void eos_delay_10ms(void)
-{
-    eos_delay_block(10);
-}
-
-static void eos_delay_50ms(void)
-{
-    for (uint8_t i = 0; i < 5; i ++) {
-        eos_delay_10ms();
-    }
-}
-
-uint8_t systick_count = 0;
-uint8_t usage_stack_max[4];
-uint8_t uasge_cpu[4];
-const char *name[4] =
-{
-    "Task1", "Task2", "Task3", "Task4"
-};
-void SysTick_Handler(void)
-{
-    systick_count ++;
-    if (systick_count >= 10) {
-        systick_count = 0;
-        eos_tick();
-    }
-    
-//    eos_cpu_usage_monitor();
-//    if (eos_time() > 100) {
-//        for (uint8_t i = 0; i < 3; i ++) {
-//            usage_stack_max[i] = eos_task_stack_usage(name[i]);
-//            uasge_cpu[i] = eos_task_cpu_usage(name[i]);
-//        }
-//    }
-}
-
-void HardFault_Handler(void)
-{
-    while (1) {
-    }
-}
+#endif
