@@ -42,7 +42,7 @@ void test_start(void)
     eos_task_start(&task5, task_entry_yield_5, 2, stack_5, sizeof(stack_5), NULL);
     eos_task_start(&task6, task_entry_yield_6, 2, stack_6, sizeof(stack_6), NULL);
     eos_task_start(&task7, task_entry_yield_7, 2, stack_7, sizeof(stack_7), NULL);
-    eos_task_start(&task8, task_entry_yield_8, 1, stack_8, sizeof(stack_8), NULL);
+    eos_task_start(&task8, task_entry_yield_8, 2, stack_8, sizeof(stack_8), NULL);
     
     for (uint32_t i = 0; i < 8; i ++)
     {
@@ -98,9 +98,7 @@ void task_entry_yield_4(void *parameter)
         count_yelid ++;
         count_task[3] ++;
         
-        eos_task_yield();
-        
-        eos_delay_ms(100000);
+        eos_delay_ms(100);
     }
 }
 
@@ -149,9 +147,7 @@ void task_entry_yield_8(void *parameter)
         count_yelid ++;
         count_task[7] ++;
         
-        eos_task_yield();
-        
-        eos_delay_ms(100000);
+        eos_delay_ms(100);
     }
 }
 

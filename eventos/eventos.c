@@ -238,6 +238,7 @@ void eos_delay_ms(uint32_t time_ms)
 {
     if (time_ms == 0)
     {
+        eos_task_yield();
         return;
     }
     
@@ -281,8 +282,109 @@ void eos_task_exit(void)
     eos_sheduler();
 }
 
+
+static bool eos_check_timer(bool task_idle)
+{
+    eos_critical_enter();
+
+    /* check all the task are timeout or not. */
+    eos_task_t *list = eos.list;
+    while (list != NULL)
+    {
+        if (list->state == EosTaskState_Blocked)
+        {
+            if (eos.time >= list->timeout)
+            {
+                list->state = EosTaskState_Ready;
+                if (task_idle)
+                {
+                    eos_critical_exit();
+                    eos_sheduler();
+                    eos_critical_enter();
+                }
+            }
+        }
+
+        list = list->next;
+    }
+    
+    if (eos.time >= EOS_MS_NUM_15DAY)
+    {
+        list = eos.list;
+        while (list != NULL)
+        {
+            if (list->state == EosTaskState_Blocked)
+            {
+                list->timeout -= eos.time;
+            }
+            list = list->next;
+        }
+        
+        // Adjust all timmer's timing.
+        eos_timer_t *list_tim = eos.timers;
+        while (list_tim != (eos_timer_t *)0)
+        {
+            if (list_tim->running != 0)
+            {
+                list_tim->time_out -= eos.time;
+            }
+            list_tim = list_tim->next;
+        }
+        eos.time_out_min -= eos.time;
+
+        eos.time_offset += eos.time;
+        eos.time = 0;
+    }
+
+    // if any timer is timeout
+    bool ret = false;
+    if (eos.time >= eos.time_out_min)
+    {
+        eos_timer_t *list;
+        // Find the time-out timers and excute the handlers.
+        list = eos.timers;
+        while (list != (eos_timer_t *)0)
+        {
+            if (list->running != 0 && eos.time >= list->time_out)
+            {
+                eos_critical_exit();
+                list->callback(list->parameter);
+                eos_critical_enter();
+                if (list->oneshoot == 0)
+                {
+                    list->time_out += list->time;
+                }
+                else
+                {
+                    list->running = 0;
+                }
+            }
+            list = list->next;
+        }
+        // Recalculate the minimum timeout value.
+        list = eos.timers;
+        uint32_t time_out_min = UINT32_MAX;
+        while (list != (eos_timer_t *)0)
+        {
+            if (list->running != 0 && time_out_min > list->time_out)
+            {
+                time_out_min = list->time_out;
+            }
+            list = list->next;
+        }
+        eos.time_out_min = time_out_min;
+        ret = true;
+    }
+
+    eos_critical_exit();
+    
+    return ret;
+}
+
 void eos_task_yield(void)
 {
+    eos_check_timer(false);
+    
     eos_critical_enter();
     
     eos_task_t *head = NULL, *tail = NULL;
@@ -359,9 +461,11 @@ eos_task_t *eos_get_task(void)
     return eos_current;
 }
 
+
 static void eos_sheduler(void)
 {
     eos_critical_enter();
+        
     eos_task_t *list = eos.list;
     while (list != NULL)
     {
@@ -718,17 +822,17 @@ static void task_entry_idle(void *parameter)
 {
     (void)parameter;
     
-    eos_critical_enter();
+    
     
     while (1)
     {
-        eos_task_t *list;
 #if (EOS_USE_STACK_USAGE != 0)
         // 堆栈使用率的计算
+        eos_critical_enter();
         uint8_t usage = 0;
         uint32_t *stack;
         uint32_t size_used = 0;
-        list = eos.list;
+        eos_task_t *list = eos.list;
         while (list != NULL)
         {
             size_used = 0;
@@ -748,101 +852,13 @@ static void task_entry_idle(void *parameter)
             list->usage = usage;
             list = list->next;
         }
+        eos_critical_exit();
 #endif
-        /* check all the task are timeout or not. */
-        list = eos.list;
-        bool sheduler_en = false;
-        while (list != NULL)
-        {
-            if (list->state == EosTaskState_Blocked)
-            {
-                if (eos.time >= list->timeout)
-                {
-                    list->state = EosTaskState_Ready;
-                    sheduler_en = true;
-                }
-            }
 
-            list = list->next;
-        }
-        if (sheduler_en == true)
-        {
-            eos_critical_exit();
-            eos_sheduler();
-            eos_critical_enter();
-        }
-
-        if (eos.time >= EOS_MS_NUM_15DAY)
-        {
-            list = eos.list;
-            while (list != NULL)
-            {
-                if (list->state == EosTaskState_Blocked)
-                {
-                    list->timeout -= eos.time;
-                }
-                list = list->next;
-            }
-            
-            // Adjust all timmer's timing.
-            eos_timer_t *list_tim = eos.timers;
-            while (list_tim != (eos_timer_t *)0)
-            {
-                if (list_tim->running != 0)
-                {
-                    list_tim->time_out -= eos.time;
-                }
-                list_tim = list_tim->next;
-            }
-            eos.time_out_min -= eos.time;
-
-            eos.time_offset += eos.time;
-            eos.time = 0;
-        }
-
-        // if any timer is timeout
-        if (eos.time >= eos.time_out_min)
-        {
-            eos_timer_t *list;
-            // Find the time-out timers and excute the handlers.
-            list = eos.timers;
-            while (list != (eos_timer_t *)0)
-            {
-                if (list->running != 0 && eos.time >= list->time_out)
-                {
-                    eos_critical_exit();
-                    list->callback(list->parameter);
-                    eos_critical_enter();
-                    if (list->oneshoot == 0)
-                    {
-                        list->time_out += list->time;
-                    }
-                    else
-                    {
-                        list->running = 0;
-                    }
-                }
-                list = list->next;
-            }
-            // Recalculate the minimum timeout value.
-            list = eos.timers;
-            uint32_t time_out_min = UINT32_MAX;
-            while (list != (eos_timer_t *)0)
-            {
-                if (list->running != 0 && time_out_min > list->time_out)
-                {
-                    time_out_min = list->time_out;
-                }
-                list = list->next;
-            }
-            eos.time_out_min = time_out_min;
-        }
         // if no timer is timeout
-        else
+        if (eos_check_timer(true))
         {
-            eos_critical_exit();
             eos_hook_idle();
-            eos_critical_enter();
         }
     }
 }
