@@ -42,10 +42,10 @@ int main(void)
     eos_init(stack_idle, sizeof(stack_idle));       // EventOS初始化
     
     // 启动LED闪烁任务
-    eos_task_start(&led, task_entry_led, 2, stack_led, sizeof(stack_led));
+    eos_task_start(&led, (eos_func_t)task_entry_led, 2, stack_led, sizeof(stack_led),(void*)0);
 
     // 启动计数任务
-    eos_task_start(&count, task_entry_count, 3, stack_count, sizeof(stack_count));
+    eos_task_start(&count, (eos_func_t)task_entry_count, 3, stack_count, sizeof(stack_count),(void*)0);
 
     eos_run();                                      // EventOS启动
 
@@ -57,10 +57,10 @@ uint8_t led_status = 0;
 
 static void task_entry_led(void)
 {
-    eos_task_start(&test_exit, task_entry_test_exit, 4, stack_test_exit, sizeof(stack_test_exit));
+    eos_task_start(&test_exit, (eos_func_t)task_entry_test_exit, 4, stack_test_exit, sizeof(stack_test_exit),(void*)0);
     
     // 启动定时器
-    timer_test.id = eos_timer_start(&timer, 10, false, timer_handler_10ms);
+    timer_test.id = eos_timer_start(&timer, 10, false, (eos_func_t)timer_handler_10ms,(void*)0);
     
     while (1) {
         led_status = 0;

@@ -23,14 +23,14 @@ int main(void)
     if (SysTick_Config(SystemCoreClock / 1000) != 0)
         while (1);
     
-//    static uint64_t stack_idle[32];
-//    eos_init(stack_idle, sizeof(stack_idle));       // EventOS初始化
-//    
-//    // 启动LED闪烁任务
-//    eos_task_start(&led, task_entry_led, 1, stack_led, sizeof(stack_led));
+    static uint64_t stack_idle[32];
+    eos_init(stack_idle, sizeof(stack_idle));       // EventOS初始化
+    
+    // 启动LED闪烁任务
+    eos_task_start(&led, (eos_func_t)task_entry_led, 1, stack_led, sizeof(stack_led),(void*)0);
 
-//    // 启动计数任务
-//    eos_task_start(&count, task_entry_count, 2, stack_count, sizeof(stack_count));
+    // 启动计数任务
+    eos_task_start(&count, (eos_func_t)task_entry_count, 2, stack_count, sizeof(stack_count),(void*)0);
 
 //    eos_run();                                      // EventOS启动
     
@@ -39,18 +39,18 @@ int main(void)
     return 0;
 }
 
-//uint8_t led_status = 0;
-//static void task_entry_led(void)
-//{
-//    eos_task_start(&test_exit, task_entry_test_exit, 3, stack_test_exit, sizeof(stack_test_exit));
-//    
-//    while (1) {
-//        led_status = 0;
-//        eos_delay_ms(500);
-//        led_status = 1;
-//        eos_delay_ms(500);
-//    }
-//}
+uint8_t led_status = 0;
+static void task_entry_led(void)
+{
+    eos_task_start(&test_exit, (eos_func_t)task_entry_test_exit, 3, stack_test_exit, sizeof(stack_test_exit),(void*)0);
+    
+    while (1) {
+        led_status = 0;
+        eos_delay_ms(500);
+        led_status = 1;
+        eos_delay_ms(500);
+    }
+}
 
 uint32_t count_num = 0;
 static void task_entry_count(void)
