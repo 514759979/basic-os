@@ -56,7 +56,7 @@ extern "C" {
 #define EOS_USE_ASSERT                          1
 
 // 是否统计堆栈使用率
-#define EOS_USE_STACK_USAGE                     1
+#define EOS_USE_STACK_USAGE                     0
 
 // 是否统计CPU使用率
 #define EOS_USE_CPU_USAGE                       1
