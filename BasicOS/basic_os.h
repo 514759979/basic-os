@@ -47,11 +47,6 @@ extern "C" {
 /**
   * @brief  The maximum number of tasks in BasicOS.
   */
-#define BOS_MAX_STACKS_SIZE                     (4096)
-
-/**
-  * @brief  The maximum number of tasks in BasicOS.
-  */
 #define BOS_MAX_TASKS                           (16)
 
 /**
@@ -139,7 +134,7 @@ typedef struct eos_timer
   * @param  size    The global stack memory size.
   * @retval None
   */
-void basic_os_init(void);
+void basic_os_init(void *stack, uint32_t size);
 
 /**
   * @brief  Start to run BasicOS kernel.

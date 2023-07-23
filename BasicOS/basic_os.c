@@ -100,7 +100,6 @@ bos_task_t *volatile bos_next;
 
 /* private variables -------------------------------------------------------- */
 static basic_os_t bos;
-static uint8_t bos_stack[BOS_MAX_STACKS_SIZE];
 
 /* private function --------------------------------------------------------- */
 static void bos_sheduler(void);
@@ -128,16 +127,15 @@ bos_timer_export(basic_timer, _cb_timer_tick, false, NULL);
   * @param  size    The global stack memory size.
   * @retval None
   */
-void basic_os_init(void)
+void basic_os_init(void *stack, uint32_t size)
 {
     bos_critical_enter();
     
     bos_cpu_hw_init();
 
     /* Set the stack and its size. */
-    uint32_t size = BOS_MAX_STACKS_SIZE;
-    uint32_t mod = (uint32_t)bos_stack % 8;
-    bos.stack = mod == 0 ? bos_stack : (void *)((uint32_t)bos_stack + 8 - mod);
+    uint32_t mod = (uint32_t)stack % 8;
+    bos.stack = mod == 0 ? stack : (void *)((uint32_t)stack + 8 - mod);
     size = (((uint32_t)bos.stack + size - mod) / 8) * 8 - (uint32_t)bos.stack;
     bos.stack_size = size / 4;
 
