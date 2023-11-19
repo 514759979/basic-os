@@ -178,6 +178,12 @@ void bos_task_exit(void);
   */
 void bos_task_yield(void);
 
+/**
+  * @brief  Estimate the used stack size in the BasicOS kernel.
+  * @retval The used stack size.
+  */
+uint32_t bos_get_used_stack_size(void);
+
 /* Soft timer --------------------------------------------------------------- */
 /**
   * @brief  Get the BasicOS timer's ID from its name.

@@ -100,6 +100,7 @@ bos_task_t *volatile bos_next;
 
 /* private variables -------------------------------------------------------- */
 static basic_os_t bos;
+static uint32_t stack_used = 0;
 
 /* private function --------------------------------------------------------- */
 static void bos_sheduler(void);
@@ -500,6 +501,15 @@ void bos_timer_reset(uint16_t timer_id, uint32_t period)
     bos_critical_exit();
 }
 
+/**
+  * @brief  Estimate the used stack size in the BasicOS kernel.
+  * @retval The used stack size.
+  */
+uint32_t bos_get_used_stack_size(void)
+{
+    return stack_used;
+}
+
 /* private function --------------------------------------------------------- */
 /**
   * @brief  Check all thread timers and soft-timers are timeout or not.
@@ -671,18 +681,21 @@ static void bos_sheduler(void)
         #define STACK_SIZE_PUSH                 (64)
         
         uint32_t sp_value = get_sp_value();
+        uint32_t _stack_used = (bos.task_count << 7) + (bos.stack_size << 2) -
+                                (sp_value - (uint32_t)bos_current->stack);
+        stack_used = (_stack_used > stack_used) ? _stack_used : stack_used;
         
         /* The current task move to front. */
         if (bos_next->task_id < bos_current->task_id)
         {
-            copy_size = bos_next->stack_size * 4;
+            copy_size = bos_next->stack_size << 2;
             move_size = sp_value - STACK_SIZE_PUSH - (uint32_t)bos_current->stack;
             for (uint32_t i = bos_next->task_id + 1; i < bos_current->task_id; i ++)
             {
                 task_data = (bos_task_t *)bos.task_table[i].data;
                 task_data->stack = (void *)((uint32_t)task_data->stack + move_size);
                 task_data->sp = (void *)((uint32_t)task_data->sp + move_size);
-                copy_size += task_data->stack_size * 4;
+                copy_size += task_data->stack_size << 2;
             }
             addr_target = (uint32_t)bos_next->stack + move_size;
             addr_source = (uint32_t)bos_next->stack;
@@ -690,8 +703,8 @@ static void bos_sheduler(void)
             bos_current->stack = (void *)((uint32_t)bos_current->stack + move_size);
             bos_current->sp = (void *)((uint32_t)sp_value - STACK_SIZE_PUSH);
             
-            bos_current->stack_size -= (move_size / 4);
-            bos_next->stack_size += (move_size / 4);
+            bos_current->stack_size -= (move_size >> 2);
+            bos_next->stack_size += (move_size >> 2);
             bos_next->sp = (void *)((uint32_t)bos_next->sp + move_size);
             move_size = move_size;
         }
@@ -699,7 +712,7 @@ static void bos_sheduler(void)
         else
         {
             move_size = sp_value - STACK_SIZE_PUSH - (uint32_t)bos_current->stack;
-            copy_size = bos_current->stack_size * 4 - move_size;
+            copy_size = (bos_current->stack_size << 2) - move_size;
             addr_target = (uint32_t)bos_current->stack;
             addr_source = (uint32_t)(sp_value - STACK_SIZE_PUSH);
             for (uint32_t i = bos_current->task_id + 1; i < bos_next->task_id; i ++)
@@ -707,11 +720,11 @@ static void bos_sheduler(void)
                 task_data = (bos_task_t *)bos.task_table[i].data;
                 task_data->stack = (void *)((uint32_t)task_data->stack - move_size);
                 task_data->sp = (void *)((uint32_t)task_data->sp - move_size);
-                copy_size += task_data->stack_size * 4;
+                copy_size += task_data->stack_size << 2;
             }
             
-            bos_current->stack_size -= (move_size / 4);
-            bos_next->stack_size += (move_size / 4);
+            bos_current->stack_size -= (move_size >> 2);
+            bos_next->stack_size += (move_size >> 2);
             bos_current->sp = bos_current->stack;
             bos_next->stack = (void *)((uint32_t)bos_next->stack - move_size);
             move_size = move_size;
