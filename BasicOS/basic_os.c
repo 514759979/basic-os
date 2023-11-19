@@ -103,6 +103,7 @@ static basic_os_t bos;
 
 /* private function --------------------------------------------------------- */
 static void bos_sheduler(void);
+static void bos_start(void);
 static bool bos_check_timer(bool task_idle);
 static void _entry_idle(void *parameter);
 static void _cb_timer_tick(void *para);
@@ -254,7 +255,7 @@ void basic_os_run(void)
     bos_hook_start();
     
     /* Run the BasicOS sheduler to start all the tasks. */
-    bos_sheduler();
+    bos_start();
     
     /*  It's impossible for MCU to get here. If the assert is reached, something 
         wrong occurs. */
@@ -614,109 +615,113 @@ static bool bos_check_timer(bool task_idle)
 }
 
 /**
-  * @brief  Check all thread timers and soft-timers are timeout or not.
-  * @param  task_idle   In idle thread or not.
-  * @retval If false, not timer is timeout.
+  * @brief  Start BasicOS sheduler.
+  * @retval None.
+  */
+static void bos_start(void)
+{
+    bos_critical_enter();
+    bos_cpu_trig_task_switch();
+    bos_critical_exit();
+}
+
+/**
+  * @brief  BasicOS sheduler.
+  * @retval None.
   */
 static void bos_sheduler(void)
 {
     bos_task_t *task_data = NULL;
 
     bos_critical_enter();
-    
-    if (bos_current != NULL)
+
+    /* The actual priority of idle task is 0. */
+    bos_next = &ram_task_timer_data;
+    uint8_t priority = 0;
+    uint32_t count = 0;
+    for (uint32_t i = ((bos_current->task_id + 1) % bos.task_count); ;)
     {
-        /* The actual priority of idle task is 0. */
-        bos_next = &ram_task_timer_data;
-        uint8_t priority = 0;
-        uint32_t count = 0;
-        for (uint32_t i = ((bos_current->task_id + 1) % bos.task_count); ;)
+        task_data = (bos_task_t *)bos.task_table[i].data;
+        if (task_data->state == BosTaskState_Ready &&
+            bos.task_table[i].priority > priority)
         {
-            task_data = (bos_task_t *)bos.task_table[i].data;
-            if (task_data->state == BosTaskState_Ready &&
-                bos.task_table[i].priority > priority)
-            {
-                bos_next = task_data;
-                priority = bos.task_table[i].priority;
-            }
-
-            if (task_data->state == BosTaskState_Ready &&
-                bos.task_table[i].priority == bos.task_table[bos_current->task_id].priority &&
-                bos_next == &ram_task_timer_data)
-            {
-                bos_next = task_data;
-                priority = bos.task_table[i].priority;
-            }
-
-            count ++;
-            i = (i + 1) % bos.task_count;
-            if (count >= bos.task_count)
-            {
-                break;
-            }
+            bos_next = task_data;
+            priority = bos.task_table[i].priority;
         }
-        
-        if (bos_next != bos_current)
-        {
-            #define STACK_SIZE_PUSH                 (64)
-            
-            uint32_t sp_value = get_sp_value();
-            
-            /* The current task move to front. */
-            if (bos_next->task_id < bos_current->task_id)
-            {
-                copy_size = bos_next->stack_size * 4;
-                move_size = sp_value - STACK_SIZE_PUSH - (uint32_t)bos_current->stack;
-                for (uint32_t i = bos_next->task_id + 1; i < bos_current->task_id; i ++)
-                {
-                    task_data = (bos_task_t *)bos.task_table[i].data;
-                    task_data->stack = (void *)((uint32_t)task_data->stack + move_size);
-                    task_data->sp = (void *)((uint32_t)task_data->sp + move_size);
-                    copy_size += task_data->stack_size * 4;
-                }
-                addr_target = (uint32_t)bos_next->stack + move_size;
-                addr_source = (uint32_t)bos_next->stack;
-                
-                bos_current->stack = (void *)((uint32_t)bos_current->stack + move_size);
-                bos_current->sp = (void *)((uint32_t)sp_value - STACK_SIZE_PUSH);
-                
-                bos_current->stack_size -= (move_size / 4);
-                bos_next->stack_size += (move_size / 4);
-                bos_next->sp = (void *)((uint32_t)bos_next->sp + move_size);
-                move_size = move_size;
-            }
-            /* The current task move to back. */
-            else
-            {
-                move_size = sp_value - STACK_SIZE_PUSH - (uint32_t)bos_current->stack;
-                copy_size = bos_current->stack_size * 4 - move_size;
-                addr_target = (uint32_t)bos_current->stack;
-                addr_source = (uint32_t)(sp_value - STACK_SIZE_PUSH);
-                for (uint32_t i = bos_current->task_id + 1; i < bos_next->task_id; i ++)
-                {
-                    task_data = (bos_task_t *)bos.task_table[i].data;
-                    task_data->stack = (void *)((uint32_t)task_data->stack - move_size);
-                    task_data->sp = (void *)((uint32_t)task_data->sp - move_size);
-                    copy_size += task_data->stack_size * 4;
-                }
-                
-                bos_current->stack_size -= (move_size / 4);
-                bos_next->stack_size += (move_size / 4);
-                bos_current->sp = bos_current->stack;
-                bos_next->stack = (void *)((uint32_t)bos_next->stack - move_size);
-                move_size = move_size;
-            }
 
-            #undef STACK_SIZE_PUSH
-            
-            bos_cpu_trig_task_switch();
+        if (task_data->state == BosTaskState_Ready &&
+            bos.task_table[i].priority == bos.task_table[bos_current->task_id].priority &&
+            bos_next == &ram_task_timer_data)
+        {
+            bos_next = task_data;
+            priority = bos.task_table[i].priority;
+        }
+
+        count ++;
+        i = (i + 1) % bos.task_count;
+        if (count >= bos.task_count)
+        {
+            break;
         }
     }
-    else
+    
+    /* Switch the task */
+    if (bos_next != bos_current)
     {
+        #define STACK_SIZE_PUSH                 (64)
+        
+        uint32_t sp_value = get_sp_value();
+        
+        /* The current task move to front. */
+        if (bos_next->task_id < bos_current->task_id)
+        {
+            copy_size = bos_next->stack_size * 4;
+            move_size = sp_value - STACK_SIZE_PUSH - (uint32_t)bos_current->stack;
+            for (uint32_t i = bos_next->task_id + 1; i < bos_current->task_id; i ++)
+            {
+                task_data = (bos_task_t *)bos.task_table[i].data;
+                task_data->stack = (void *)((uint32_t)task_data->stack + move_size);
+                task_data->sp = (void *)((uint32_t)task_data->sp + move_size);
+                copy_size += task_data->stack_size * 4;
+            }
+            addr_target = (uint32_t)bos_next->stack + move_size;
+            addr_source = (uint32_t)bos_next->stack;
+            
+            bos_current->stack = (void *)((uint32_t)bos_current->stack + move_size);
+            bos_current->sp = (void *)((uint32_t)sp_value - STACK_SIZE_PUSH);
+            
+            bos_current->stack_size -= (move_size / 4);
+            bos_next->stack_size += (move_size / 4);
+            bos_next->sp = (void *)((uint32_t)bos_next->sp + move_size);
+            move_size = move_size;
+        }
+        /* The current task move to back. */
+        else
+        {
+            move_size = sp_value - STACK_SIZE_PUSH - (uint32_t)bos_current->stack;
+            copy_size = bos_current->stack_size * 4 - move_size;
+            addr_target = (uint32_t)bos_current->stack;
+            addr_source = (uint32_t)(sp_value - STACK_SIZE_PUSH);
+            for (uint32_t i = bos_current->task_id + 1; i < bos_next->task_id; i ++)
+            {
+                task_data = (bos_task_t *)bos.task_table[i].data;
+                task_data->stack = (void *)((uint32_t)task_data->stack - move_size);
+                task_data->sp = (void *)((uint32_t)task_data->sp - move_size);
+                copy_size += task_data->stack_size * 4;
+            }
+            
+            bos_current->stack_size -= (move_size / 4);
+            bos_next->stack_size += (move_size / 4);
+            bos_current->sp = bos_current->stack;
+            bos_next->stack = (void *)((uint32_t)bos_next->stack - move_size);
+            move_size = move_size;
+        }
+
+        #undef STACK_SIZE_PUSH
+        
         bos_cpu_trig_task_switch();
     }
-    
+
     bos_critical_exit();
 }
 
